@@ -254,28 +254,20 @@ private struct ProviderAccountSection: View {
     }
 
     private var sectionHeader: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 8) {
-                Text(model.provider.displayName)
-                    .font(.system(size: 15, weight: .semibold))
-                Text("\(model.accounts.count)")
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(Palette.muted)
-                    .accessibilityLabel("\(model.accounts.count) saved accounts")
-                Spacer(minLength: 12)
-                Button(action: onAdd) {
-                    Label("Add account", systemImage: "plus")
-                }
-                .buttonStyle(ActionButtonStyle(prominent: false))
-                .disabled(isBlocked)
-                .accessibilityLabel("Add \(model.provider.displayName) account")
-            }
-            Text(model.provider == .chatGPT
-                 ? "Codex allowance remaining · ChatGPT chat quotas are separate."
-                 : "Claude Code · Allowance remaining")
-                .font(.system(size: 10))
+        HStack(spacing: 8) {
+            Text(model.provider.displayName)
+                .font(.system(size: 15, weight: .semibold))
+            Text("\(model.accounts.count)")
+                .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(Palette.muted)
-                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel("\(model.accounts.count) saved accounts")
+            Spacer(minLength: 12)
+            Button(action: onAdd) {
+                Label("Add account", systemImage: "plus")
+            }
+            .buttonStyle(ActionButtonStyle(prominent: false))
+            .disabled(isBlocked)
+            .accessibilityLabel("Add \(model.provider.displayName) account")
         }
     }
 
