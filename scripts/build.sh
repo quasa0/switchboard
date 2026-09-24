@@ -14,8 +14,8 @@ cat > "$SWITCHBOARD_APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleName</key><string>Switchboard</string>
 <key>CFBundleDisplayName</key><string>Switchboard</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.4.1</string>
-<key>CFBundleVersion</key><string>7</string>
+<key>CFBundleShortVersionString</key><string>0.5.0</string>
+<key>CFBundleVersion</key><string>8</string>
 <key>CFBundleIconFile</key><string>Switchboard.icns</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSHighResolutionCapable</key><true/>

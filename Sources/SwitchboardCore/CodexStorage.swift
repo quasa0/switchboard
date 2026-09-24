@@ -89,7 +89,23 @@ public struct CodexCredentialSnapshot: Codable, Equatable, Sendable {
         if let claimWorkspace = auth["chatgpt_account_id"] as? String, claimWorkspace != workspace { throw invalidLogin() }
         let rawPlan = auth["chatgpt_plan_type"] as? String ?? "ChatGPT"
         let plan = SubscriptionProvider.chatGPT.planLabel(rawPlan)
-        return CurrentLogin(email: email, accountUUID: user, organizationUUID: workspace, plan: plan)
+        let period = subscriptionPeriod(auth: auth, claims: claims, accountID: workspace)
+        return CurrentLogin(email: email, accountUUID: user, organizationUUID: workspace, plan: plan,
+                            subscriptionPeriod: period)
+    }
+
+    private func subscriptionPeriod(auth: [String: Any], claims: [String: Any], accountID: String) -> SubscriptionPeriod? {
+        // The CLI preserves these ID-token claims even though account/read omits them.
+        // https://github.com/router-for-me/CLIProxyAPI/blob/main/internal/auth/codex/jwt_parser.go
+        guard auth["chatgpt_account_id"] as? String == accountID,
+              let endsAt = SubscriptionDateParser.parse(auth["chatgpt_subscription_active_until"]) else { return nil }
+        let startsAt = SubscriptionDateParser.parse(auth["chatgpt_subscription_active_start"])
+        if let startsAt, startsAt > endsAt { return nil }
+        // Codex can advance last_refresh while retaining an old ID token. Use its own observation time.
+        let checkedAt = SubscriptionDateParser.parse(auth["chatgpt_subscription_last_checked"])
+            ?? SubscriptionDateParser.parse(claims["iat"])
+        return SubscriptionPeriod(startsAt: startsAt, endsAt: endsAt, checkedAt: checkedAt,
+                                  source: .codexIDToken)
     }
 
     var refreshedAt: Date? {

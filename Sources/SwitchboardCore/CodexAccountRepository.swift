@@ -70,6 +70,14 @@ public final class CodexAccountRepository {
         let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { account.label = String(trimmed.prefix(80)) }
         account.email = identity.email; account.plan = identity.plan
+        // Optional claims can disappear or be malformed. Keep prior metadata with its original
+        // checkedAt rather than marking it fresh or erasing the user's manual renewal override.
+        if let period = identity.subscriptionPeriod {
+            let older = account.subscriptionPeriod?.checkedAt.map { previous in
+                period.checkedAt.map { $0 < previous } ?? false
+            } ?? false
+            if !older { account.subscriptionPeriod = period }
+        }
         let previous = try secrets.read(service: vaultService, account: account.id.uuidString)
         try secrets.write(encoder.encode(snapshot), service: vaultService, account: account.id.uuidString)
         if let index { accounts[index] = account } else { accounts.append(account) }

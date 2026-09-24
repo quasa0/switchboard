@@ -184,6 +184,7 @@ struct AccountListView: View {
 
 private struct ProviderAccountSection: View {
     @ObservedObject var model: AppModel
+    @State private var connectingBilling: SavedAccount?
     let wideLayout: Bool
     let isBlocked: Bool
     let onAdd: () -> Void
@@ -234,13 +235,15 @@ private struct ProviderAccountSection: View {
                             metricTitles: metricTitles,
                             showsManualResets: model.provider == .chatGPT || model.accounts.contains { $0.usage?.manualResets != nil },
                             isActive: account.id == model.activeID,
-                            isBusy: isBlocked,
+                            isBusy: isBlocked || connectingBilling != nil,
                             isSwitching: account.id == model.switchingAccountID,
                             usageError: model.usageErrors[account.id],
+                            billingError: model.billingErrors[account.id],
                             onSwitch: { Task { await model.switchAccount(account) } },
                             onRename: { onRename(account) },
                             onSetRenewal: { onSetRenewal(account) },
                             onViewResets: { onViewResets(account) },
+                            onConnectBilling: { connectingBilling = account },
                             onRemove: { onRemove(account) }
                         )
                     }
@@ -251,6 +254,9 @@ private struct ProviderAccountSection: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
+        .sheet(item: $connectingBilling) { account in
+            ClaudeBillingSheet(account: account, model: model)
+        }
     }
 
     private var sectionHeader: some View {
@@ -369,6 +375,149 @@ func accountUsageMetrics(_ usage: UsageSnapshot?, provider: SubscriptionProvider
     return metrics
 }
 
+struct AccountBillingDatePresentation {
+    let date: Date
+    let label: String
+    let explanation: String
+    let displayText: String?
+
+    init(date: Date, label: String, explanation: String, displayText: String? = nil) {
+        self.date = date
+        self.label = label
+        self.explanation = explanation
+        self.displayText = displayText
+    }
+}
+
+/// Manual overrides remain authoritative; reported period boundaries are not payment guarantees.
+func accountBillingDate(_ account: SavedAccount, now: Date = Date()) -> AccountBillingDatePresentation? {
+    if let renewal = account.renewalAt {
+        return AccountBillingDatePresentation(
+            date: renewal,
+            label: renewal > now ? "Renews" : "Renewal",
+            explanation: "Renewal date entered manually: \(renewal.formatted(date: .complete, time: .shortened)). This overrides the automatically reported date. Clear the manual override in account options to restore automatic metadata."
+        )
+    }
+    if let billing = account.claudeBilling {
+        return claudeBillingDate(billing, now: now)
+    }
+    guard let period = account.subscriptionPeriod else { return nil }
+    let label: String
+    if period.endsAt <= now {
+        label = "Last period ended"
+    } else {
+        switch period.willRenew {
+        case .some(true): label = "Renews"
+        case .some(false): label = "Ends"
+        case nil: label = "Period ends"
+        }
+    }
+    let source: String
+    switch period.source {
+    case .codexIDToken: source = "Codex ID token"
+    case .claudeBilling: source = "Claude billing"
+    }
+    var details = ["Subscription period ends \(period.endsAt.formatted(date: .complete, time: .shortened)).", "Source: \(source)."]
+    if let startsAt = period.startsAt {
+        details.append("Period began \(startsAt.formatted(date: .complete, time: .shortened)).")
+    }
+    if let checkedAt = period.checkedAt {
+        details.append("Checked \(checkedAt.formatted(date: .complete, time: .shortened)).")
+    } else {
+        details.append("Check time unavailable.")
+    }
+    switch period.willRenew {
+    case .some(true): details.append("The provider reports automatic renewal.")
+    case .some(false): details.append("The provider reports no automatic renewal.")
+    case nil: details.append("Automatic renewal is not confirmed.")
+    }
+    details.append("This is a reported subscription period boundary, not a guaranteed charge date.")
+    return AccountBillingDatePresentation(date: period.endsAt, label: label, explanation: details.joined(separator: " "))
+}
+
+private struct ClaudeBillingDisplayDate {
+    let date: Date
+    let dateOnly: String?
+}
+
+private func claudeBillingDate(_ billing: ClaudeBillingSnapshot, now: Date) -> AccountBillingDatePresentation? {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    let today = calendar.startOfDay(for: now)
+    let checked = "Source: Claude billing. Checked \(billing.checkedAt.formatted(date: .complete, time: .shortened))."
+    let status = billing.status.map { " Reported status: \($0)." } ?? ""
+
+    if let coverage = billing.giftPaidThrough, let date = utcBillingDate(coverage) {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.setLocalizedDateFormatFromTemplate("MMMd")
+        let label = date < today ? "Gift covered through" : "Gift covers through"
+        return AccountBillingDatePresentation(
+            date: date,
+            label: label,
+            explanation: "Gift coverage includes \(coverage), a date without a time of day. \(checked)\(status) This is gift coverage, not a guaranteed charge date.",
+            displayText: "\(label) \(formatter.string(from: date))"
+        )
+    }
+
+    func candidate(exact: Date?, dateOnly: String?) -> ClaudeBillingDisplayDate? {
+        if let exact { return ClaudeBillingDisplayDate(date: exact, dateOnly: nil) }
+        guard let dateOnly, let date = utcBillingDate(dateOnly) else { return nil }
+        return ClaudeBillingDisplayDate(date: date, dateOnly: dateOnly)
+    }
+    let nextCharge = candidate(exact: billing.nextChargeAt, dateOnly: billing.nextChargeDate)
+    let planEnd = candidate(exact: billing.planEndingAt, dateOnly: billing.planEndingDate)
+    func chargePrecedesPlanEnd(_ charge: ClaudeBillingDisplayDate) -> Bool {
+        guard let planEnd else { return true }
+        if charge.dateOnly != nil || planEnd.dateOnly != nil {
+            return calendar.startOfDay(for: charge.date) < calendar.startOfDay(for: planEnd.date)
+        }
+        return charge.date < planEnd.date
+    }
+    let selected: ClaudeBillingDisplayDate
+    let label: String
+    if billing.status?.lowercased() != "trialing", let nextCharge,
+       chargePrecedesPlanEnd(nextCharge) {
+        selected = nextCharge
+        label = nextCharge.dateOnly != nil ? (nextCharge.date < today ? "Reported charge" : "Next charge")
+            : (nextCharge.date < now ? "Reported charge" : "Next charge")
+    } else if let planEnd {
+        selected = planEnd
+        label = planEnd.dateOnly != nil ? (planEnd.date < today ? "Plan ended" : "Plan ends")
+            : (planEnd.date < now ? "Plan ended" : "Plan ends")
+    } else { return nil }
+
+    if let day = selected.dateOnly {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.setLocalizedDateFormatFromTemplate("MMMd")
+        return AccountBillingDatePresentation(
+            date: selected.date,
+            label: label,
+            explanation: "\(label): \(day), reported as a date without a time of day. \(checked)\(status) Billing dates can change and do not guarantee a charge.",
+            displayText: "\(label) \(formatter.string(from: selected.date))"
+        )
+    }
+    return AccountBillingDatePresentation(
+        date: selected.date,
+        label: label,
+        explanation: "\(label): \(selected.date.formatted(date: .complete, time: .shortened)). \(checked)\(status) Billing dates can change and do not guarantee a charge."
+    )
+}
+
+private func utcBillingDate(_ raw: String) -> Date? {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.calendar = Calendar(identifier: .gregorian)
+    formatter.timeZone = TimeZone(secondsFromGMT: 0)
+    formatter.dateFormat = "yyyy-MM-dd"
+    formatter.isLenient = false
+    guard let date = formatter.date(from: raw), formatter.string(from: date) == raw else { return nil }
+    return date
+}
+
 private struct AccountRow: View {
     let account: SavedAccount
     let provider: SubscriptionProvider
@@ -379,10 +528,12 @@ private struct AccountRow: View {
     let isBusy: Bool
     let isSwitching: Bool
     let usageError: String?
+    let billingError: String?
     let onSwitch: () -> Void
     let onRename: () -> Void
     let onSetRenewal: () -> Void
     let onViewResets: () -> Void
+    let onConnectBilling: () -> Void
     let onRemove: () -> Void
     @State private var isHovered = false
     @FocusState private var isFocused: Bool
@@ -418,6 +569,12 @@ private struct AccountRow: View {
                 }
                 if let usageError {
                     Label(usageError, systemImage: "exclamationmark.circle")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.danger)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let billingError {
+                    Label("Billing check failed: \(billingError)", systemImage: "exclamationmark.circle")
                         .font(.system(size: 11))
                         .foregroundStyle(Palette.danger)
                         .fixedSize(horizontal: false, vertical: true)
@@ -466,12 +623,14 @@ private struct AccountRow: View {
                 .font(.system(size: 13, weight: .semibold, design: .monospaced))
                 .lineLimit(1)
                 .truncationMode(hasCustomName ? .tail : .middle)
+                .help(hasCustomName ? "\(account.label)\n\(account.email)" : account.email)
             if hasCustomName {
                 Text(account.email)
                     .font(.system(size: 11))
                     .foregroundStyle(Palette.muted)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                    .help(account.email)
             }
             HStack(spacing: 8) {
                 PlanBadge(label: provider.planLabel(account.plan))
@@ -485,23 +644,22 @@ private struct AccountRow: View {
                     .help("Last successful usage check: \(usage.fetchedAt.formatted(date: .complete, time: .shortened))")
                 }
             }
-            if let renewal = account.renewalAt {
-                TimelineView(.periodic(from: .now, by: 60)) { context in
-                    Text("\(renewal > context.date ? "Renews" : "Renewal") \(compactDueDate(renewal)) · \(dueInterval(renewal, now: context.date))")
+            TimelineView(.periodic(from: .now, by: 60)) { context in
+                if let billingDate = accountBillingDate(account, now: context.date) {
+                    Text(billingDate.displayText ?? "\(billingDate.label) \(compactDueDate(billingDate.date)) · \(dueInterval(billingDate.date, now: context.date))")
                         .font(.system(size: 10))
                         .foregroundStyle(Palette.muted)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
+                        .help(billingDate.explanation)
+                } else {
+                    Text("Billing date unavailable")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Palette.muted)
+                        .help("No subscription-period date was reported. You can enter a manual renewal override in account options.")
                 }
-                .help("Renewal date set manually: \(renewal.formatted(date: .complete, time: .shortened)). Edit it in account options.")
-            } else {
-                Text("Renewal not set")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Palette.muted)
-                    .help("Set the renewal date in account options.")
             }
         }
-        .help(hasCustomName ? "\(account.label)\n\(account.email)" : account.email)
     }
 
     @ViewBuilder
@@ -557,10 +715,14 @@ private struct AccountRow: View {
 
     private var options: some View {
         Menu {
+            if provider == .claude {
+                Button(account.claudeBilling == nil ? "Connect billing…" : "Refresh billing…",
+                       systemImage: "creditcard", action: onConnectBilling)
+            }
             if account.usage?.manualResets != nil {
                 Button("Manual reset details…", systemImage: "arrow.counterclockwise", action: onViewResets)
             }
-            Button(account.renewalAt == nil ? "Set renewal date…" : "Edit renewal date…",
+            Button(account.renewalAt == nil ? "Set renewal override…" : "Edit renewal override…",
                    systemImage: "calendar", action: onSetRenewal)
             Button("Rename account…", systemImage: "pencil", action: onRename)
             Divider()
@@ -602,8 +764,9 @@ private struct AccountRow: View {
     }
 
     private var renewalDescription: String {
-        guard let renewal = account.renewalAt else { return "Renewal date not set." }
-        return "Renewal date set manually: \(renewal.formatted(date: .complete, time: .shortened))."
+        let date = accountBillingDate(account)?.explanation ?? "Billing date unavailable. No subscription-period date was reported."
+        let failure = billingError.map { " Billing check failed: \($0)" } ?? ""
+        return date + failure
     }
 }
 
@@ -1006,26 +1169,26 @@ private struct RenewalDateSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Subscription renewal")
+            Text("Renewal date override")
                 .font(.system(size: 21, weight: .semibold))
             Text(account.email)
                 .font(.system(size: 12))
                 .foregroundStyle(Palette.muted)
-            Text("Enter the date from your billing settings. This date is saved locally and is not verified with \(model.provider.displayName).")
+            Text("Enter a manual renewal date from your billing settings. This local override takes priority over automatic metadata. Clearing it restores the automatically reported date when available.")
                 .font(.system(size: 12))
                 .foregroundStyle(Palette.muted)
                 .fixedSize(horizontal: false, vertical: true)
-            DatePicker("Renewal date", selection: $renewalDate, displayedComponents: [.date, .hourAndMinute])
+            DatePicker("Manual renewal date", selection: $renewalDate, displayedComponents: [.date, .hourAndMinute])
                 .datePickerStyle(.compact)
                 .controlSize(.large)
-                .accessibilityLabel("Subscription renewal date and time")
+                .accessibilityLabel("Manual subscription renewal date and time")
                 .disabled(model.isBusy || model.isRefreshing)
             if let error = model.error {
                 MessageStrip(symbol: "exclamationmark.circle", text: error, isError: true)
             }
             HStack {
                 if account.renewalAt != nil {
-                    Button("Clear date", role: .destructive) { save(nil) }
+                    Button("Clear override", role: .destructive) { save(nil) }
                         .disabled(model.isBusy || model.isRefreshing)
                 }
                 Spacer()
@@ -1043,7 +1206,7 @@ private struct RenewalDateSheet: View {
         .frame(width: 450)
         .background(Palette.canvas)
         .foregroundStyle(Palette.ink)
-        .onAppear { renewalDate = account.renewalAt ?? Date() }
+        .onAppear { renewalDate = account.renewalAt ?? account.subscriptionPeriod?.endsAt ?? Date() }
         .interactiveDismissDisabled(model.isBusy)
     }
 

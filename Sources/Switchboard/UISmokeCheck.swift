@@ -157,6 +157,7 @@ private struct UIVerificationError: LocalizedError {
     static func run(model: DashboardModel, output: URL) async throws -> UISmokeReport {
         try require(model.isCredentialFreePreview, "UI smoke must have no account engines.")
         try checkSafeLaunchFlags()
+        try checkBillingDatePresentation()
         let fixture = DashboardModel(demo: true)
         try require(fixture.isCredentialFreePreview && fixture.accountCount == 4,
                     "Both providers' synthetic accounts were not initialized together.")
@@ -272,11 +273,47 @@ private struct UIVerificationError: LocalizedError {
         records.append(try await UIPreviewRenderer.render(model: resetStates, state: .accounts,
             to: output.appendingPathComponent("manual-reset-states.png")))
 
+        let automaticBilling = DashboardModel(demo: true)
+        let billingNow = Date()
+        let giftFormatter = DateFormatter()
+        giftFormatter.locale = Locale(identifier: "en_US_POSIX")
+        giftFormatter.calendar = Calendar(identifier: .gregorian)
+        giftFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+        giftFormatter.dateFormat = "yyyy-MM-dd"
+        automaticBilling.claude.accounts[0].claudeBilling = ClaudeBillingSnapshot(
+            checkedAt: billingNow, status: "trialing", nextChargeAt: billingNow.addingTimeInterval(5 * 86_400),
+            giftPaidThrough: giftFormatter.string(from: billingNow.addingTimeInterval(90 * 86_400)))
+        automaticBilling.claude.accounts[1].claudeBilling = ClaudeBillingSnapshot(
+            checkedAt: billingNow, status: "canceled", nextChargeAt: billingNow.addingTimeInterval(30 * 86_400),
+            planEndingAt: billingNow.addingTimeInterval(7 * 86_400))
+        automaticBilling.chatGPT.accounts[0].subscriptionPeriod = SubscriptionPeriod(
+            endsAt: billingNow.addingTimeInterval(9 * 86_400), checkedAt: billingNow,
+            willRenew: true, source: .codexIDToken)
+        automaticBilling.chatGPT.accounts[1].subscriptionPeriod = SubscriptionPeriod(
+            endsAt: billingNow.addingTimeInterval(-3 * 86_400), checkedAt: billingNow.addingTimeInterval(-4 * 86_400),
+            source: .codexIDToken)
+        let failedBillingID = automaticBilling.claude.accounts[1].id
+        let retainedBilling = automaticBilling.claude.accounts[1].claudeBilling
+        automaticBilling.claude.billingErrors[failedBillingID] = "Saved billing date kept. Reconnect billing to try again."
+        automaticBilling.claude.usageErrors[failedBillingID] = "Saved usage kept. Refresh to try again."
+        try require(automaticBilling.claude.accounts[1].claudeBilling == retainedBilling &&
+                    automaticBilling.claude.billingErrors[failedBillingID] != nil &&
+                    automaticBilling.claude.usageErrors[failedBillingID] != nil,
+                    "Billing and usage failures must coexist without replacing cached billing metadata.")
+        records.append(try await UIPreviewRenderer.render(model: automaticBilling, state: .accounts,
+            to: output.appendingPathComponent("automatic-billing.png"), dark: true))
+
         return UISmokeReport(credentialAccess: false,
             assertions: ["Every UI flag selects demo before model initialization", "No account engines in preview dashboards",
                          "Both providers and active accounts coexist", "Each provider switch updates only its own identity",
                          "ChatGPT sample plans distinguish Pro 20× and Pro 5×",
                          "Manual reset counts preserve unavailable, zero, capped details, due dates, and no expiry",
+                         "Automatic billing distinguishes renewal certainty, elapsed periods, and unavailable dates",
+                         "Manual renewal overrides take precedence and clearing restores automatic dates",
+                         "Claude gift coverage keeps its whole UTC date and takes precedence over monthly charges",
+                         "Claude cancellation and trial dates do not invent renewals",
+                         "Billing and usage failures preserve their independent cached data",
+                         "Preview billing sessions construct no WebView or web data store",
                          "Each provider switch includes its session notice", "Rename and remove preserve sibling provider state",
                          "Remove preserves simulated current login", "Preview sign-in stays in memory",
                          "Dashboard count and busy state aggregate both providers", "One provider error leaves the other healthy",
@@ -296,6 +333,19 @@ private struct UIVerificationError: LocalizedError {
                         "A \(provider.rawValue) operation changed its sibling provider's accounts or identity.")
         }
         let first = selected.accounts[0], second = selected.accounts[1]
+        let automaticDate = accountBillingDate(first)?.date
+        let manualDate = Date().addingTimeInterval(60 * 86_400)
+        await selected.setRenewal(account: first, date: manualDate)
+        try require(selected.accounts[0].renewalAt == manualDate &&
+                    accountBillingDate(selected.accounts[0])?.date == manualDate &&
+                    selected.accounts[0].subscriptionPeriod == first.subscriptionPeriod &&
+                    selected.accounts[0].claudeBilling == first.claudeBilling,
+                    "A manual renewal override must win without changing automatic billing metadata.")
+        try siblingUnchanged()
+        await selected.setRenewal(account: selected.accounts[0], date: nil)
+        try require(selected.accounts[0].renewalAt == nil && accountBillingDate(selected.accounts[0])?.date == automaticDate,
+                    "Clearing a manual renewal override must restore the provider's automatic date.")
+        try siblingUnchanged()
         await selected.switchAccount(second)
         try require(selected.activeID == second.id && selected.current?.accountUUID == second.accountUUID,
                     "Switching \(provider.rawValue) did not update its in-memory identity.")
@@ -320,6 +370,93 @@ private struct UIVerificationError: LocalizedError {
         try require(!selected.loginInProgress && selected.isCredentialFreePreview,
                     "Preview sign-in attempted to start a real login.")
         try siblingUnchanged()
+    }
+
+    private static func checkBillingDatePresentation() throws {
+        let iso = ISO8601DateFormatter()
+        let now = iso.date(from: "2026-09-24T12:00:00Z")!
+        let future = iso.date(from: "2026-10-24T12:00:00Z")!
+        var account = SavedAccount(label: "Billing fixture", email: "billing@sample.example",
+            accountUUID: "billing-fixture", organizationUUID: "billing-org", plan: "Pro")
+        try require(accountBillingDate(account, now: now) == nil,
+                    "Absent subscription metadata must not invent a billing date.")
+
+        account.subscriptionPeriod = SubscriptionPeriod(endsAt: future, checkedAt: now, source: .codexIDToken)
+        try require(accountBillingDate(account, now: now)?.label == "Period ends" &&
+                    accountBillingDate(account, now: now)?.explanation.contains("Source: Codex ID token.") == true &&
+                    accountBillingDate(account, now: now)?.explanation.contains("Checked ") == true,
+                    "Unknown renewal certainty must show a period end with its source and observation time.")
+        account.subscriptionPeriod?.willRenew = true
+        try require(accountBillingDate(account, now: now)?.label == "Renews",
+                    "Confirmed automatic renewal should be labeled Renews.")
+        account.subscriptionPeriod?.willRenew = false
+        try require(accountBillingDate(account, now: now)?.label == "Ends",
+                    "A nonrenewing subscription should be labeled Ends.")
+        account.subscriptionPeriod?.willRenew = nil
+        account.subscriptionPeriod?.endsAt = now.addingTimeInterval(-1)
+        try require(accountBillingDate(account, now: now)?.label == "Last period ended",
+                    "An elapsed cached period must not claim that account authentication expired.")
+
+        let giftDay = "2027-01-27"
+        let giftMidnight = iso.date(from: "2027-01-27T00:00:00Z")!
+        account.claudeBilling = ClaudeBillingSnapshot(checkedAt: now, status: "trialing", nextChargeAt: future,
+            giftPaidThrough: giftDay)
+        let gift = accountBillingDate(account, now: now)
+        try require(gift?.date == giftMidnight && gift?.label == "Gift covers through" &&
+                    gift?.displayText?.hasPrefix("Gift covers through ") == true &&
+                    gift?.displayText?.contains(":") == false &&
+                    gift?.explanation.contains(giftDay) == true &&
+                    gift?.explanation.contains("date without a time of day") == true,
+                    "Gift coverage must preempt a monthly charge without presenting an invented midnight or local cutoff.")
+        try require(accountBillingDate(account, now: giftMidnight.addingTimeInterval(86_399))?.label == "Gift covers through" &&
+                    accountBillingDate(account, now: giftMidnight.addingTimeInterval(86_400))?.label == "Gift covered through",
+                    "Gift coverage must include its complete UTC calendar day.")
+
+        let override = now.addingTimeInterval(2 * 86_400)
+        account.renewalAt = override
+        try require(accountBillingDate(account, now: now)?.date == override &&
+                    accountBillingDate(account, now: now)?.explanation.contains("entered manually") == true,
+                    "A manual override must take precedence over both Claude billing and subscription-period metadata.")
+        account.renewalAt = nil
+        try require(accountBillingDate(account, now: now)?.date == giftMidnight,
+                    "Clearing an override must expose the saved gift coverage again.")
+
+        let planEnd = now.addingTimeInterval(7 * 86_400)
+        account.claudeBilling = ClaudeBillingSnapshot(checkedAt: now, status: "canceled", nextChargeAt: future,
+            planEndingAt: planEnd)
+        try require(accountBillingDate(account, now: now)?.date == planEnd &&
+                    accountBillingDate(account, now: now)?.label == "Plan ends",
+                    "A reported charge after cancellation must not override the earlier plan end.")
+        account.claudeBilling?.nextChargeAt = planEnd
+        try require(accountBillingDate(account, now: now)?.label == "Plan ends",
+                    "A same-time charge is not before the plan end.")
+        account.claudeBilling?.status = "trialing"
+        account.claudeBilling?.nextChargeAt = now.addingTimeInterval(86_400)
+        try require(accountBillingDate(account, now: now)?.label == "Plan ends",
+                    "Trial metadata must prefer the reported plan end over a potential charge.")
+        account.claudeBilling?.planEndingAt = nil
+        try require(accountBillingDate(account, now: now) == nil,
+                    "A trial-only potential charge must not become a fabricated renewal.")
+
+        account.claudeBilling = ClaudeBillingSnapshot(checkedAt: now, status: "active",
+            nextChargeAt: iso.date(from: "2026-10-24T01:00:00Z")!, planEndingDate: "2026-10-24")
+        try require(accountBillingDate(account, now: now)?.label == "Plan ends" &&
+                    accountBillingDate(account, now: now)?.displayText != nil,
+                    "An exact charge and a date-only plan end on the same UTC day must not acquire a guessed ordering.")
+        account.claudeBilling?.nextChargeAt = nil
+        account.claudeBilling?.nextChargeDate = "2026-10-23"
+        try require(accountBillingDate(account, now: now)?.label == "Next charge" &&
+                    accountBillingDate(account, now: now)?.displayText != nil,
+                    "A date-only charge before the plan end should retain its date-only presentation.")
+        account.claudeBilling = ClaudeBillingSnapshot(checkedAt: now, paymentPausedUntil: future)
+        try require(accountBillingDate(account, now: now) == nil,
+                    "A payment pause alone must not become a renewal or resurrect older period metadata.")
+
+        let session = ClaudeBillingSession(account: account, enabled: false)
+        defer { session.stop() }
+        session.open()
+        try require(session.webView == nil && !session.isChecking,
+                    "Preview billing sessions must never create a WebView or start a billing request.")
     }
 
     private static func checkSafeLaunchFlags() throws {

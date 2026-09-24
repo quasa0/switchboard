@@ -145,6 +145,15 @@ public final class AccountRepository {
         try save(accounts)
     }
 
+    public func setClaudeBilling(_ id: UUID, billing: ClaudeBillingSnapshot) throws {
+        var accounts = try accounts()
+        guard let index = accounts.firstIndex(where: { $0.id == id }) else {
+            throw SwitchboardError.message("This account is no longer saved.")
+        }
+        accounts[index].claudeBilling = billing
+        try save(accounts)
+    }
+
     public func remove(_ id: UUID) throws {
         // Removing a saved entry never logs out or revokes the active CLI login.
         let existing = try accounts()

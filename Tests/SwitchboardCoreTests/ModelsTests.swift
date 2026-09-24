@@ -50,6 +50,22 @@ final class ModelsTests: RepositoryTestCase {
             accountUUID: "account-a", organizationUUID: "org-a", plan: "Max 20×",
             addedAt: Date(timeIntervalSinceReferenceDate: 0)))
         XCTAssertNil(decoded.renewalAt)
+        XCTAssertNil(decoded.subscriptionPeriod)
+    }
+
+    func testAutomaticPeriodAndManualRenewalRemainIndependentInSavedMetadata() throws {
+        let period = SubscriptionPeriod(endsAt: Date(timeIntervalSince1970: 1_790_000_000),
+            checkedAt: Date(timeIntervalSince1970: 1_789_000_000), source: .codexIDToken)
+        var account = SavedAccount(label: "Personal", email: "synthetic@example.test", accountUUID: "account-a",
+            organizationUUID: "org-a", plan: "Pro", renewalAt: Date(timeIntervalSince1970: 1_791_000_000),
+            subscriptionPeriod: period)
+        let decoded = try JSONDecoder().decode(SavedAccount.self, from: JSONEncoder().encode(account))
+        XCTAssertEqual(decoded, account)
+        XCTAssertNotEqual(decoded.renewalAt, decoded.subscriptionPeriod?.endsAt)
+        account.renewalAt = nil
+        XCTAssertEqual(account.subscriptionPeriod, period)
+        XCTAssertNil(CurrentLogin(email: "synthetic@example.test", accountUUID: "account-a",
+            organizationUUID: "org-a", plan: "Pro").subscriptionPeriod)
     }
 
     func testManualRenewalRoundTripsAndSurvivesCredentialRecapture() throws {

@@ -61,7 +61,7 @@ expected = {
     "accounts-light.png", "accounts-dark.png", "empty.png", "loading.png",
     "error.png", "unavailable.png", "exhausted.png", "switching.png", "long-label.png", "minimum-width.png",
     "missing-five-hour.png", "five-hour-restored.png", "one-provider-error.png", "only-claude.png", "only-chatgpt.png",
-    "manual-reset-states.png",
+    "manual-reset-states.png", "automatic-billing.png",
 }
 if {entry["file"] for entry in report["renders"]} != expected:
     raise SystemExit("UI smoke did not render every required state.")

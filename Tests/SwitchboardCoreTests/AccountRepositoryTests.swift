@@ -3,6 +3,24 @@ import XCTest
 @testable import SwitchboardCore
 
 final class AccountRepositoryTests: RepositoryTestCase {
+    func testWebBillingIsMetadataOnlyAndSurvivesCredentialRecapture() throws {
+        let first = try snapshot()
+        try seedLive(first)
+        let account = try repository.capture(first)
+        let secretsBefore = secrets.values, writesBefore = secrets.writes
+        let configBefore = try Data(contentsOf: installation.configFile)
+        let billing = ClaudeBillingSnapshot(checkedAt: Date(timeIntervalSince1970: 1_790_000_000),
+            status: "active", nextChargeDate: "2026-09-27", giftPaidThrough: "2027-01-27")
+        try repository.withLock { try repository.setClaudeBilling(account.id, billing: billing) }
+        XCTAssertEqual(try repository.accounts().first?.claudeBilling, billing)
+        XCTAssertEqual(secrets.values, secretsBefore)
+        XCTAssertEqual(secrets.writes, writesBefore)
+        XCTAssertEqual(try Data(contentsOf: installation.configFile), configBefore)
+        XCTAssertEqual(try repository.capture(first).claudeBilling, billing)
+        XCTAssertThrowsError(try repository.setClaudeBilling(UUID(), billing: billing))
+        XCTAssertEqual(try repository.accounts().first?.claudeBilling, billing)
+    }
+
     func testManualRenewalIsScopedToAccountPersistsAndNeverChangesLiveLogin() throws {
         let first = try snapshot(), second = try snapshot("b")
         try seedLive(first, config: ["theme": "dark"])

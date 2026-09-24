@@ -3,6 +3,82 @@ import XCTest
 @testable import SwitchboardCore
 
 final class CodexAccountRepositoryTests: CodexTestCase {
+    func testAutomaticPeriodPersistsAndUpdatesWithoutReplacingManualRenewalOrLiveLogin() throws {
+        let live = try snapshot()
+        try seed(live)
+        let first = try snapshot("b", authClaims: [
+            "chatgpt_subscription_active_until": "2026-10-24T09:00:00Z",
+            "chatgpt_subscription_last_checked": "2026-09-24T09:00:00Z"
+        ])
+        let saved = try repository.capture(first)
+        let manual = Date(timeIntervalSince1970: 1_850_000_000)
+        try repository.setRenewal(saved.id, date: manual)
+        let updated = try snapshot("b", token: "rotated", authClaims: [
+            "chatgpt_subscription_active_until": "2026-11-24T09:00:00Z",
+            "chatgpt_subscription_last_checked": "2026-10-24T09:00:00Z"
+        ])
+        let recaptured = try repository.capture(updated)
+        XCTAssertEqual(recaptured.subscriptionPeriod, try updated.validated().subscriptionPeriod)
+        XCTAssertEqual(recaptured.renewalAt, manual)
+        let reopened = CodexAccountRepository(directory: repository.directory, secrets: secrets, installation: installation)
+        XCTAssertEqual(try reopened.accounts(), [recaptured])
+        XCTAssertEqual(try Data(contentsOf: installation.authFile), live.authJSON)
+        let metadata = try String(contentsOf: repository.directory.appendingPathComponent("accounts.json"), encoding: .utf8)
+        XCTAssertTrue(metadata.contains("codexIDToken"))
+        XCTAssertFalse(metadata.contains("access_token"))
+        XCTAssertFalse(metadata.contains("id_token"))
+        try reopened.setRenewal(saved.id, date: nil)
+        XCTAssertEqual(try reopened.accounts().first?.subscriptionPeriod, recaptured.subscriptionPeriod)
+    }
+
+    func testOmittedMalformedOrOlderClaimsKeepTheOriginalObservationTime() throws {
+        let original = try snapshot(authClaims: [
+            "chatgpt_subscription_active_until": "2026-10-24T09:00:00Z",
+            "chatgpt_subscription_last_checked": "2026-09-24T09:00:00Z"
+        ])
+        let saved = try repository.capture(original)
+        let missing = try snapshot(refreshed: "2027-01-01T00:00:00Z")
+        let malformed = try snapshot(authClaims: ["chatgpt_subscription_active_until": false])
+        let older = try snapshot(authClaims: [
+            "chatgpt_subscription_active_until": "2026-09-24T09:00:00Z",
+            "chatgpt_subscription_last_checked": "2026-08-24T09:00:00Z"
+        ])
+        for credential in [missing, malformed, older] {
+            let recaptured = try repository.capture(credential)
+            XCTAssertEqual(recaptured.subscriptionPeriod, saved.subscriptionPeriod)
+            XCTAssertEqual(recaptured.id, saved.id)
+        }
+    }
+
+    func testAutomaticPeriodsRemainScopedToSavedWorkspace() throws {
+        let personal = try repository.capture(snapshot(authClaims: [
+            "chatgpt_subscription_active_until": "2026-10-24T09:00:00Z"
+        ]))
+        let workspace = try repository.capture(snapshot(workspace: "different-workspace", authClaims: [
+            "chatgpt_subscription_active_until": "2026-11-01T00:00:00Z"
+        ]))
+        XCTAssertNotEqual(personal.id, workspace.id)
+        XCTAssertNotEqual(personal.subscriptionPeriod?.endsAt, workspace.subscriptionPeriod?.endsAt)
+        XCTAssertEqual(try repository.accounts(), [personal, workspace])
+    }
+
+    func testOrdinaryUsageCollectionAddsPeriodToPreviouslySavedAccount() throws {
+        let live = try snapshot()
+        try seed(live)
+        let saved = try repository.capture(snapshot("b"))
+        XCTAssertNil(saved.subscriptionPeriod)
+        let installation = try repository.prepareUsage(saved.id)
+        let rotated = try snapshot("b", token: "usage-refresh", authClaims: [
+            "chatgpt_subscription_active_until": "2026-10-24T09:00:00Z",
+            "chatgpt_subscription_last_checked": "2026-09-24T09:00:00Z"
+        ])
+        try CodexLoginStore(installation: installation).apply(rotated)
+        try repository.collectUsageCredentials(saved.id, from: installation)
+        XCTAssertEqual(try repository.accounts().first?.subscriptionPeriod, try rotated.validated().subscriptionPeriod)
+        XCTAssertEqual(try repository.credential(for: saved.id), rotated)
+        XCTAssertEqual(try repository.live.snapshot(), live)
+    }
+
     func testManualRenewalIsScopedToAccountPersistsAndNeverChangesLiveLogin() throws {
         let first = try snapshot(), second = try snapshot("b")
         try seed(first)

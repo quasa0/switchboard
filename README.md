@@ -18,13 +18,21 @@ Browser sessions can automatically choose the account already signed in. Check t
 
 Account tiers include their reported multiplier: Claude Pro · 1× or Max · 5×/20×; ChatGPT Plus · 1× or Pro · 5×/20×. Codex calls the smaller Pro tier `prolite`. Unknown plans keep their name without a guessed multiplier. These multipliers are provider-specific, not equivalent allowances across providers.
 
-Use an account's **… → Set renewal date** to enter its billing renewal date and time. The inspected CLI interfaces do not provide a verified billing date. These dates are explicitly manual; they are never inferred from token expiry or quota resets and never advance automatically. Editing a date or account name changes display metadata without reading credentials.
+ChatGPT subscription periods are read automatically from the saved Codex ID token during the normal account refresh. **Period ends** is the provider-reported boundary; the token does not confirm that the plan will renew. The original observation time stays in the tooltip. An elapsed period is not rolled forward and does not mean that the CLI login expired.
+
+For each Claude account, choose **… → Connect billing**, sign into that account in the embedded Claude page, then click **Read billing**. This one-time web connection reads billing dates that the inspected CLI interface does not expose. Later Refresh actions update the dates through the same isolated web session. Gift subscriptions show **Gift covers through**; date-only coverage never gets an invented time. The app verifies both account and organization before saving metadata. A failed or expired web session preserves the last date and shows a billing warning.
+
+**… → Set renewal date** remains an optional manual override. Clearing it restores the automatic date. Billing dates are never inferred from token expiry, subscription creation, or quota resets. Editing an override or account name changes display metadata without reading credentials.
 
 You can also sign in manually with `claude auth login --claudeai`, then save that current login. **Save each account before signing into the next. Do not run `claude auth logout` between them:** current Claude Code revokes refresh tokens on logout. For additional ChatGPT accounts, use Switchboard’s isolated sign-in so Codex does not replace or revoke the existing local login. Removing an account from Switchboard deletes its saved copy and leaves the active CLI login intact.
 
 ## How it works
 
 Saved login snapshots use separate Mac Keychain services: `com.quasa0.switchboard.accounts` for Claude and `com.quasa0.switchboard.codex-accounts` for ChatGPT. Account names, emails, and usage snapshots are stored separately under `~/Library/Application Support/Switchboard`, with owner-only permissions. Those metadata files contain no tokens. Switchboard does not print tokens to logs.
+
+Claude billing connections use one persistent WebKit website data store per saved account. Cookies remain in WebKit; the app does not copy cookies from your browser. Removing a saved Claude account also deletes its billing web session. The billing reader performs first-party GET requests only and retains an allowlist of dates and status fields, never payment methods, invoices, or authentication fields.
+
+The Codex subscription claim names follow [CLIProxyAPI's ID-token parser](https://github.com/router-for-me/CLIProxyAPI/blob/main/internal/auth/codex/jwt_parser.go). Claude billing uses the first-party web app's `/api/organizations/{organizationUUID}/subscription_details` contract. These are internal provider formats and can change; missing metadata remains unavailable instead of being guessed.
 
 ### Claude Code
 
@@ -66,7 +74,7 @@ Claude’s local credential format and `get_usage` protocol are not stable publi
 
 Requires macOS 14+, Swift 5.10+ / Xcode Command Line Tools, and the CLI for each provider you use: Claude Code or Codex. No package dependencies.
 
-- `swift test` runs synthetic account, persistence, protocol, and process-cleanup tests. It does not read real credentials.
+- `swift test` runs synthetic account, persistence, protocol, and process-cleanup tests. `node scripts/test-billing-reader.mjs` checks the actual web billing reader with mocked network responses. Neither reads real credentials.
 - `./scripts/ui-smoke.sh "$HOME/Applications/Switchboard.app"` checks in-memory UI actions and independent active accounts, renders the combined dashboard in light/dark and exceptional states, and verifies normal quit cleanup. It never initializes either account engine or accesses credentials. Use this for visual work.
 - `./scripts/install.sh` builds, signs with an available Apple Development identity (or ad hoc), and installs `~/Applications/Switchboard.app`. Quit the app before rebuilding it.
 - `./scripts/smoke.sh "$HOME/Applications/Switchboard.app"` runs the Claude credential smoke with synthetic accounts. It exercises **real Keychain** writes in unique temporary namespaces, verifies switching and token preservation, removes test secrets, and renders light/dark/empty UI previews. It never reads your Claude login. This is separate from the credential-free UI smoke and can cause Keychain permission prompts.

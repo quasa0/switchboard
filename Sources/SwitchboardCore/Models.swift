@@ -48,14 +48,21 @@ public struct SavedAccount: Codable, Identifiable, Equatable, Sendable {
     public var usage: UsageSnapshot?
     /// A renewal date entered by the user. Never inferred from token expiry or usage resets.
     public var renewalAt: Date?
+    /// Automatic provider metadata. A manual renewalAt remains an explicit display override.
+    public var subscriptionPeriod: SubscriptionPeriod?
+    /// Billing metadata from this account's separate Claude web session.
+    public var claudeBilling: ClaudeBillingSnapshot?
 
     public init(id: UUID = UUID(), label: String, email: String, accountUUID: String,
                 organizationUUID: String, plan: String, addedAt: Date = Date(),
-                lastUsedAt: Date? = nil, usage: UsageSnapshot? = nil, renewalAt: Date? = nil) {
+                lastUsedAt: Date? = nil, usage: UsageSnapshot? = nil, renewalAt: Date? = nil,
+                subscriptionPeriod: SubscriptionPeriod? = nil, claudeBilling: ClaudeBillingSnapshot? = nil) {
         self.id = id; self.label = label; self.email = email
         self.accountUUID = accountUUID; self.organizationUUID = organizationUUID
         self.plan = plan; self.addedAt = addedAt; self.lastUsedAt = lastUsedAt; self.usage = usage
         self.renewalAt = renewalAt
+        self.subscriptionPeriod = subscriptionPeriod
+        self.claudeBilling = claudeBilling
     }
     public var initials: String {
         let words = label.split(separator: " ")
@@ -132,9 +139,12 @@ public struct CurrentLogin: Equatable, Sendable {
     public var accountUUID: String
     public var organizationUUID: String
     public var plan: String
-    public init(email: String, accountUUID: String, organizationUUID: String, plan: String) {
+    public var subscriptionPeriod: SubscriptionPeriod?
+    public init(email: String, accountUUID: String, organizationUUID: String, plan: String,
+                subscriptionPeriod: SubscriptionPeriod? = nil) {
         self.email = email; self.accountUUID = accountUUID
         self.organizationUUID = organizationUUID; self.plan = plan
+        self.subscriptionPeriod = subscriptionPeriod
     }
 }
 

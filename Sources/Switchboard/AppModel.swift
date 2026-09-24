@@ -19,6 +19,9 @@ actor AccountEngine: SubscriptionEngine {
     }
     func rename(_ id: UUID, label: String) throws { try repository.withLock { try repository.rename(id, label: label) } }
     func setRenewal(_ id: UUID, date: Date?) throws { try repository.withLock { try repository.setRenewal(id, date: date) } }
+    func setClaudeBilling(_ id: UUID, billing: ClaudeBillingSnapshot) throws {
+        try repository.withLock { try repository.setClaudeBilling(id, billing: billing) }
+    }
     func remove(_ id: UUID) throws { try repository.withLock { try repository.remove(id) } }
     func usage(_ id: UUID) async throws {
         refreshing = true
@@ -65,6 +68,7 @@ actor AccountEngine: SubscriptionEngine {
 @MainActor final class AppModel: ObservableObject {
     let provider: SubscriptionProvider
     @Published var accounts: [SavedAccount] = []
+    @Published var billingErrors: [UUID: String] = [:]
     @Published var activeID: UUID?
     @Published var switchingAccountID: UUID?
     @Published var current: CurrentLogin?
@@ -111,8 +115,15 @@ actor AccountEngine: SubscriptionEngine {
                                      sevenDay: UsageWindow(utilization: 28, resetsAt: now.addingTimeInterval(410400)),
                                      modelScoped: [NamedUsageWindow(name: "Fable 5", window: UsageWindow(utilization: 18, resetsAt: now.addingTimeInterval(324000)))]))
         ]
-        accounts[0].renewalAt = now.addingTimeInterval(9 * 86_400 + 7_200)
-        accounts[1].renewalAt = now.addingTimeInterval(24 * 86_400 + 18_000)
+        for index in accounts.indices {
+            let end = now.addingTimeInterval(Double(9 + index * 15) * 86_400 + 7_200)
+            if provider == .chatGPT {
+                accounts[index].subscriptionPeriod = SubscriptionPeriod(endsAt: end, checkedAt: now,
+                    source: .codexIDToken)
+            } else {
+                accounts[index].claudeBilling = ClaudeBillingSnapshot(checkedAt: now, status: "active", nextChargeAt: end)
+            }
+        }
         if provider == .chatGPT {
             accounts[0].plan = "Pro"
             accounts[1].plan = "Prolite"
@@ -227,6 +238,17 @@ actor AccountEngine: SubscriptionEngine {
                 do { try await engine.usage(account.id); usageErrors[account.id] = nil }
                 catch is CancellationError { break }
                 catch { usageErrors[account.id] = error.localizedDescription }
+                if provider == .claude, ClaudeBillingSession.isConnected(account.id), !stopping, !Task.isCancelled {
+                    let session = ClaudeBillingSession(account: account)
+                    do {
+                        let billing = try await session.refresh()
+                        try Task.checkCancellation()
+                        try await engine.setClaudeBilling(account.id, billing: billing)
+                        billingErrors[account.id] = nil
+                    } catch is CancellationError { session.stop(); break }
+                    catch { billingErrors[account.id] = error.localizedDescription }
+                    session.stop()
+                }
             }
             if !Task.isCancelled { await load() }
         }
@@ -277,7 +299,23 @@ actor AccountEngine: SubscriptionEngine {
                 usageErrors[account.id] = nil
             }
             notice = "Saved account removed. The CLI login is unchanged."
+            if provider == .claude, !isDemo {
+                try await ClaudeBillingSession.forget(account.id)
+            }
         }
+    }
+
+    func saveClaudeBilling(account: SavedAccount, billing: ClaudeBillingSnapshot) async -> Bool {
+        guard !stopping, provider == .claude, !isBusy, !isRefreshing, !isLoading else { return false }
+        await perform(checkLogin: false) {
+            if let engine { try await engine.setClaudeBilling(account.id, billing: billing) }
+            else if let index = accounts.firstIndex(where: { $0.id == account.id }) {
+                accounts[index].claudeBilling = billing
+            }
+            if !isDemo { ClaudeBillingSession.setConnected(true, for: account.id) }
+            billingErrors[account.id] = nil
+        }
+        return error == nil
     }
     func beginLogin() async {
         await perform {
