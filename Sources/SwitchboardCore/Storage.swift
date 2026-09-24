@@ -59,6 +59,7 @@ public final class KeychainStore: SecretStore {
 public struct ClaudeInstallation: Sendable {
     public let configDirectory: URL
     public let configFile: URL
+    public let credentialFile: URL
     public let keychainService: String
     public let keychainAccount: String
     public let configurationEnvironment: [String: String]
@@ -70,6 +71,9 @@ public struct ClaudeInstallation: Sendable {
         configDirectory = custom.map { URL(fileURLWithPath: $0) } ?? home.appendingPathComponent(".claude")
         configFile = custom == nil ? home.appendingPathComponent(".claude.json") : configDirectory.appendingPathComponent(".claude.json")
         let secureDirectory = environment["CLAUDE_SECURESTORAGE_CONFIG_DIR"] ?? custom ?? ""
+        let fileDirectory = secureDirectory.isEmpty ? home.appendingPathComponent(".claude")
+            : URL(fileURLWithPath: secureDirectory.precomposedStringWithCanonicalMapping)
+        credentialFile = fileDirectory.appendingPathComponent(".credentials.json")
         if secureDirectory.isEmpty { keychainService = "Claude Code-credentials" }
         else {
             let digest = SHA256.hash(data: Data(secureDirectory.precomposedStringWithCanonicalMapping.utf8))
@@ -142,20 +146,19 @@ public final class ClaudeLoginStore {
         self.installation = installation; self.secrets = secrets
     }
     public func snapshot() throws -> CredentialSnapshot? {
-        try rejectFallbackCredentials()
         let config = try readObject(installation.configFile)
-        guard let data = try secrets.read(service: installation.keychainService, account: installation.keychainAccount),
+        guard let data = try credentialState().data,
               let oauth = try jsonObject(data)["claudeAiOauth"], let identity = config["oauthAccount"] else { return nil }
         let snapshot = try CredentialSnapshot(oauth: jsonData(oauth), identity: jsonData(identity))
         _ = try snapshot.validated()
         return snapshot
     }
     public func apply(_ snapshot: CredentialSnapshot) throws {
-        try rejectFallbackCredentials()
         _ = try snapshot.validated()
-        var config = try readObject(installation.configFile)
-        let original = try secrets.read(service: installation.keychainService, account: installation.keychainAccount)
-        var credentials = try original.map(jsonObject) ?? [:]
+        let originalConfig = try readObject(installation.configFile)
+        var config = originalConfig
+        let original = try credentialState()
+        var credentials = try original.data.map(jsonObject) ?? [:]
         // These are Anthropic account credentials. MCP and unrelated entries remain intact.
         for key in ["organizationUuid", "trustedDeviceToken", "enterpriseGateway", "designOauth"] {
             credentials.removeValue(forKey: key)
@@ -169,23 +172,91 @@ public final class ClaudeLoginStore {
                     "cachedUsageUtilization", "githubWebConnectionStatusCache", "startupPrefetchedAt"] {
             config.removeValue(forKey: key)
         }
-        try secrets.write(try cliCredentialData(credentials), service: installation.keychainService, account: installation.keychainAccount)
+        let replacement = try cliCredentialData(credentials)
+        // Claude does not take our account lock. Detect changes across both stores
+        // before writing; never choose a different destination halfway through a switch.
+        guard try credentialState() == original,
+              NSDictionary(dictionary: originalConfig).isEqual(to: try readObject(installation.configFile)) else {
+            throw loginChanged()
+        }
+        try writeCredential(replacement, to: original.backend)
         do {
+            guard try credentialState() == CredentialState(backend: original.backend, data: replacement),
+                  NSDictionary(dictionary: originalConfig).isEqual(to: try readObject(installation.configFile)) else {
+                throw loginChanged()
+            }
             try privateWrite(try jsonData(config), to: installation.configFile)
         } catch {
-            do {
-                if let original { try secrets.write(original, service: installation.keychainService, account: installation.keychainAccount) }
-                else { try secrets.delete(service: installation.keychainService, account: installation.keychainAccount) }
-            } catch {
-                throw SwitchboardError.message("The switch failed and Keychain could not be restored. Your previous login is saved in Switchboard. Unlock Keychain, then select it again.")
+            let failure = error
+            // Do not overwrite a login another process wrote after our credential write.
+            guard try credentialState() == CredentialState(backend: original.backend, data: replacement) else {
+                throw loginChanged()
             }
-            throw error
+            do { try writeCredential(original.data, to: original.backend) }
+            catch {
+                throw SwitchboardError.message("The switch failed and Claude's credentials could not be restored. Your previous login is saved in Switchboard. Quit Claude Code, then reopen Switchboard to recover.")
+            }
+            throw failure
         }
     }
 
-    private func rejectFallbackCredentials() throws {
-        if FileManager.default.fileExists(atPath: installation.configDirectory.appendingPathComponent(".credentials.json").path) {
-            throw SwitchboardError.message("Claude has a file-based credential store in this configuration. This version switches Keychain logins only. Unlock your login Keychain and sign in with Claude Code before using Switchboard.")
+    enum CredentialBackend: Equatable { case keychain, file }
+    struct CredentialState: Equatable {
+        let backend: CredentialBackend
+        let data: Data?
+    }
+
+    func credentialState() throws -> CredentialState {
+        // Claude Code prefers any existing Keychain entry to its plaintext fallback.
+        // An inaccessible Keychain is an error, not evidence that the entry is absent.
+        if let data = try secrets.read(service: installation.keychainService, account: installation.keychainAccount) {
+            return CredentialState(backend: .keychain, data: data)
         }
+        if let data = try readCredentialFile() { return CredentialState(backend: .file, data: data) }
+        // Never create a new plaintext store. New profiles continue to use Keychain.
+        return CredentialState(backend: .keychain, data: nil)
+    }
+
+    private var credentialFile: URL { installation.credentialFile }
+
+    private func readCredentialFile() throws -> Data? {
+        // Avoid following credential symlinks or blocking on a FIFO. Read through the
+        // checked descriptor, with an allocation bound even if the file grows.
+        let fd = open(credentialFile.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+        if fd < 0 {
+            if errno == ENOENT { return nil }
+            throw SwitchboardError.message("Claude's .credentials.json could not be read safely. No login was changed.")
+        }
+        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        defer { try? handle.close() }
+        var info = stat()
+        guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG,
+              info.st_uid == getuid(), info.st_nlink == 1,
+              info.st_size <= 1_048_576 else {
+            throw SwitchboardError.message("Claude's .credentials.json must be a regular file owned by you, without links, and at most 1 MB. No login was changed.")
+        }
+        let data = try handle.read(upToCount: 1_048_577) ?? Data()
+        guard data.count <= 1_048_576 else {
+            throw SwitchboardError.message("Claude's .credentials.json exceeds 1 MB. No login was changed.")
+        }
+        _ = try jsonObject(data)
+        return data
+    }
+
+    private func writeCredential(_ data: Data?, to backend: CredentialBackend) throws {
+        switch backend {
+        case .keychain:
+            if let data { try secrets.write(data, service: installation.keychainService, account: installation.keychainAccount) }
+            else { try secrets.delete(service: installation.keychainService, account: installation.keychainAccount) }
+        case .file:
+            // File storage is selected only for an existing fallback. Atomic replacement
+            // preserves sibling credentials and sets owner-only permissions before writing.
+            guard let data else { throw loginChanged() }
+            try privateWrite(data, to: credentialFile)
+        }
+    }
+
+    private func loginChanged() -> SwitchboardError {
+        .message("Claude's login changed during the switch. Quit Claude Code and refresh before trying again. Saved accounts are intact.")
     }
 }

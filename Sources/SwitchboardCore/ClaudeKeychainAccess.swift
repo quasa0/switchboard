@@ -7,12 +7,6 @@ extension KeychainStore {
         service == "Claude Code-credentials" || service.hasPrefix("Claude Code-credentials-")
     }
 
-    /// Checks existing helper access without widening ACL or partition permissions.
-    public func allowClaudeCLI(service: String, account: String) throws {
-        guard Self.isClaudeService(service) else { return }
-        _ = try readClaudeCredential(service: service, account: account)
-    }
-
     func readClaudeCredential(service: String, account: String) throws -> Data? {
         let helper = ClaudeCredentialHelper()
         // TEMP-COMPAT 2026-09-23: migrate Claude entries created by Switchboard v0.1.0/v0.1.1 on this Mac from app-owned partitions/trusted-app ACLs to helper-created entries. Persist their complete original data in the app's migration vault before deletion so an interrupted replacement can resume. Remove both migration branches, ClaudeMigration, the migration vault helpers, nativeClaudeCredential(), nativeDeleteClaudeCredential(), hasClaudeHelperPartition(), and related migration smoke coverage only after every entry created by those versions on this Mac is verified helper-readable and com.quasa0.switchboard.migration contains no pending backups. Keep helper-only credential reads and writes.

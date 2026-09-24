@@ -12,12 +12,12 @@ A native Mac app to compare subscription limits, see reset times, and switch the
 
 Requires **macOS 14+**. The download supports **Apple silicon and Intel**. Install Claude Code or Codex for each provider you want to use.
 
-1. [Download Switchboard 0.5.1](https://github.com/quasa0/switchboard/releases/download/v0.5.1/Switchboard-0.5.1-universal.dmg).
+1. [Download Switchboard 0.5.2](https://github.com/quasa0/switchboard/releases/download/v0.5.2/Switchboard-0.5.2-universal.dmg).
 2. Open the DMG. Drag Switchboard into Applications.
 3. Open Switchboard. This release is **ad hoc signed and not notarized**. If macOS blocks it, use **System Settings → Privacy & Security → Open Anyway** after your first open attempt, if you trust the download. [Apple explains this step](https://support.apple.com/en-us/102445).
 4. Choose **Add account → Save current login**, or sign in through the app. Save each account before adding the next.
 
-[ZIP download](https://github.com/quasa0/switchboard/releases/download/v0.5.1/Switchboard-0.5.1-universal.zip) · [SHA-256 checksums](https://github.com/quasa0/switchboard/releases/download/v0.5.1/SHA256SUMS.txt)
+[ZIP download](https://github.com/quasa0/switchboard/releases/download/v0.5.2/Switchboard-0.5.2-universal.zip) · [SHA-256 checksums](https://github.com/quasa0/switchboard/releases/download/v0.5.2/SHA256SUMS.txt)
 
 For a coding agent, paste: **Install Switchboard on this Mac. Read https://switchboard.quasa0.com/install.md and follow the steps. Verify the checksum and preserve existing credentials.**
 

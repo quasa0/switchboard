@@ -207,6 +207,95 @@ final class CodexUsageTests: XCTestCase {
         try fixture.assertChildStopped()
     }
 
+    func testUnauthorizedUsageRefreshesOnceAndRetainsRotatedCredentials() async throws {
+        let fixture = try Fixture(script: Self.protocolPreamble + """
+        request = handshake()
+        print(json.dumps({'id':request['id'], 'error':{'code':-32603,'message':'failed to fetch codex rate limits: GET https://chatgpt.com/backend-api/wham/usage failed: 401 Unauthorized; content-type=application/json; body=synthetic-private'}}), flush=True)
+        refresh = json.loads(sys.stdin.readline())
+        assert refresh['method'] == 'account/read'
+        assert refresh['params'] == {'refreshToken':True}
+        Path(os.environ['CODEX_HOME'], 'auth.json').write_text('synthetic-rotated-after-401')
+        print(json.dumps({'id':refresh['id'],'result':{'account':{'type':'chatgpt'}}}), flush=True)
+        retry = json.loads(sys.stdin.readline())
+        assert retry['method'] == 'account/rateLimits/read'
+        assert retry['id'] != request['id']
+        reply = json.loads(\(Self.pythonString(Self.reply)))
+        reply['id'] = retry['id']
+        print(json.dumps(reply), flush=True)
+        assert sys.stdin.read() == ''
+        """)
+        defer { fixture.remove() }
+        let result = try await CodexUsageClient(executable: fixture.executable).fetch(installation: fixture.installation)
+        XCTAssertEqual(result.sevenDay?.utilization, 103)
+        XCTAssertEqual(try String(contentsOf: fixture.installation.authFile, encoding: .utf8), "synthetic-rotated-after-401")
+        try fixture.assertChildStopped()
+    }
+
+    func testRepeatedUnauthorizedStopsAfterOneRefreshWithoutLeakingDiagnostics() async throws {
+        let fixture = try Fixture(script: Self.protocolPreamble + """
+        request = handshake()
+        failure = {'code':-32603,'message':'failed to fetch codex rate limits: GET https://chatgpt.com/backend-api/wham/usage failed: 401 Unauthorized; body=synthetic-secret'}
+        print(json.dumps({'id':request['id'],'error':failure}), flush=True)
+        refresh = json.loads(sys.stdin.readline())
+        assert refresh['params'] == {'refreshToken':True}
+        Path(os.environ['CODEX_HOME'], 'auth.json').write_text('synthetic-refreshed-auth')
+        print(json.dumps({'id':refresh['id'],'result':{'account':{'type':'chatgpt'}}}), flush=True)
+        retry = json.loads(sys.stdin.readline())
+        print(json.dumps({'id':retry['id'],'error':failure}), flush=True)
+        assert sys.stdin.read() == ''
+        Path(__file__ + '.clean-exit').write_text('yes')
+        """)
+        defer { fixture.remove() }
+        do {
+            _ = try await CodexUsageClient(executable: fixture.executable).fetch(installation: fixture.installation)
+            XCTFail("Expected the second 401 to fail")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("HTTP 401"))
+            XCTAssertFalse(error.localizedDescription.contains("synthetic-secret"))
+            XCTAssertFalse(error.localizedDescription.contains("https://"))
+        }
+        XCTAssertEqual(try String(contentsOf: fixture.installation.authFile, encoding: .utf8), "synthetic-refreshed-auth")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.executable.path + ".clean-exit"))
+        try fixture.assertChildStopped()
+    }
+
+    func testForbiddenUsageDoesNotRefreshOrMisdiagnoseExpiredLogin() async throws {
+        let fixture = try Fixture(script: Self.protocolPreamble + """
+        request = handshake()
+        print(json.dumps({'id':request['id'],'error':{'code':-32603,'message':'failed to fetch codex rate limits: GET https://chatgpt.com/backend-api/wham/usage failed: 403 Forbidden; body=synthetic-private'}}), flush=True)
+        assert sys.stdin.read() == ''
+        Path(__file__ + '.clean-exit').write_text('yes')
+        """)
+        defer { fixture.remove() }
+        do {
+            _ = try await CodexUsageClient(executable: fixture.executable).fetch(installation: fixture.installation)
+            XCTFail("Expected forbidden usage")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("HTTP 403"))
+            XCTAssertTrue(error.localizedDescription.contains("workspace"))
+            XCTAssertFalse(error.localizedDescription.contains("expired"))
+            XCTAssertFalse(error.localizedDescription.contains("synthetic-private"))
+        }
+        XCTAssertEqual(try String(contentsOf: fixture.installation.authFile, encoding: .utf8), "synthetic-original-auth")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.executable.path + ".clean-exit"))
+        try fixture.assertChildStopped()
+    }
+
+    func testErrorClassifierUsesStatusHeaderOnlyAndRedactsAllRawDetails() throws {
+        for status in [401, 403, 429, 502] {
+            let data = try jsonData(["code": -32603, "message": "failed to fetch codex rate limits: GET https://example.test/usage failed: \(status) Error; body=synthetic-secret"])
+            let error = try JSONDecoder().decode(CodexUsageFailure.self, from: data)
+            XCTAssertEqual(error.httpStatus, status)
+            XCTAssertTrue(error.displayError(stage: "account/rateLimits/read").localizedDescription.contains("HTTP \(status)"))
+            XCTAssertFalse(error.displayError(stage: "account/rateLimits/read").localizedDescription.contains("synthetic-secret"))
+        }
+        let data = try jsonData(["code": -32602, "message": "synthetic-private 401 Unauthorized"])
+        let error = try JSONDecoder().decode(CodexUsageFailure.self, from: data)
+        XCTAssertNil(error.httpStatus)
+        XCTAssertTrue(error.displayError(stage: "account/read").localizedDescription.contains("Update Codex"))
+        XCTAssertTrue(error.displayError(stage: "account/read").localizedDescription.contains("RPC -32602"))
+    }
+
     func testRPCErrorPreservesRefreshedAuthAndHidesDiagnostics() async throws {
         let fixture = try Fixture(script: Self.protocolPreamble + """
         request = handshake()

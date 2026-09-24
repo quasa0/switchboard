@@ -34,9 +34,8 @@ public struct CodexUsageClient: Sendable {
         let reply: CodexUsageReply
         do { reply = try JSONDecoder().decode(CodexUsageReply.self, from: data) }
         catch { throw unsupportedResponse() }
-        guard reply.error == nil, let result = reply.result else {
-            throw SwitchboardError.message("Codex could not read subscription usage. Refresh again, or sign in again if the saved login has expired.")
-        }
+        if let error = reply.error { throw error.displayError(stage: "account/rateLimits/read") }
+        guard let result = reply.result else { throw unsupportedResponse() }
 
         // Both views are part of the app-server contract. A named map entry takes
         // precedence over the same bucket in the single-snapshot projection.
@@ -87,8 +86,7 @@ public struct CodexUsageClient: Sendable {
 
 private struct CodexUsageReply: Decodable {
     var result: Payload?
-    var error: RPCError?
-    struct RPCError: Decodable { var code: Int? }
+    var error: CodexUsageFailure?
     struct Payload: Decodable {
         var rateLimits: Bucket?
         var rateLimitsByLimitId: [String: Bucket]?
@@ -163,6 +161,8 @@ private final class CodexUsageProcess: @unchecked Sendable {
     private let initializeID = "switchboard-initialize"
     private let accountID = "switchboard-account"
     private let usageID = "switchboard-usage"
+    private let refreshID = "switchboard-refresh"
+    private let retryUsageID = "switchboard-usage-retry"
     private let maximumOutputBytes = 2 * 1024 * 1024
     private let maximumLineBytes = 1024 * 1024
 
@@ -243,7 +243,7 @@ private final class CodexUsageProcess: @unchecked Sendable {
             throw SwitchboardError.message("Cannot open Codex's account channel.")
         }
         try send(method: "initialize", id: initializeID,
-                 params: ["clientInfo": ["name": "switchboard", "title": "Switchboard", "version": "0.3.0"]],
+                 params: ["clientInfo": ["name": "switchboard", "title": "Switchboard", "version": "0.5.2"]],
                  to: input.fileHandleForWriting)
         let deadline = ProcessInfo.processInfo.systemUptime + timeout
         var bytesSeen = 0
@@ -286,8 +286,20 @@ private final class CodexUsageProcess: @unchecked Sendable {
                     guard line.count <= maximumLineBytes else { throw oversizedResponse() }
                     guard let frame = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
                           frame["id"] as? String == expectedID else { continue }
-                    guard frame["error"] == nil || frame["error"] is NSNull else {
-                        throw SwitchboardError.message("Codex could not read subscription usage. Refresh again, or sign in again if the saved login has expired.")
+                    if let errorObject = frame["error"], !(errorObject is NSNull) {
+                        let failure = try JSONDecoder().decode(CodexUsageFailure.self, from: jsonData(errorObject))
+                        // The account-only rate-limit endpoint does not perform the turn
+                        // runner's 401 recovery. Ask the CLI to refresh once, retaining its
+                        // rotated auth file even if the subsequent usage read fails.
+                        if expectedID == usageID, failure.httpStatus == 401 {
+                            expectedID = refreshID
+                            try send(method: "account/read", id: refreshID, params: ["refreshToken": true],
+                                     to: input.fileHandleForWriting)
+                            continue
+                        }
+                        let stage = expectedID == initializeID ? "initialize"
+                            : ([accountID, refreshID].contains(expectedID) ? "account/read" : "account/rateLimits/read")
+                        throw failure.displayError(stage: stage)
                     }
                     guard let result = frame["result"] as? [String: Any] else {
                         throw SwitchboardError.message("Codex returned an unsupported account response. Update Codex, then refresh again.")
@@ -297,12 +309,12 @@ private final class CodexUsageProcess: @unchecked Sendable {
                         expectedID = accountID
                         try send(method: "account/read", id: accountID, params: ["refreshToken": false],
                                  to: input.fileHandleForWriting)
-                    } else if expectedID == accountID {
+                    } else if expectedID == accountID || expectedID == refreshID {
                         guard let account = result["account"] as? [String: Any], account["type"] as? String == "chatgpt" else {
                             throw SwitchboardError.message("This login has no ChatGPT subscription usage. Sign in to Codex with ChatGPT.")
                         }
-                        expectedID = usageID
-                        try send(method: "account/rateLimits/read", id: usageID, params: ["excludeResetCreditDetails": false],
+                        expectedID = expectedID == refreshID ? retryUsageID : usageID
+                        try send(method: "account/rateLimits/read", id: expectedID, params: ["excludeResetCreditDetails": false],
                                  to: input.fileHandleForWriting)
                     } else {
                         return try CodexUsageClient.parseUsageResponse(line)

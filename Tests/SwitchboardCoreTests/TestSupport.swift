@@ -13,11 +13,14 @@ final class MemorySecretStore: SecretStore {
     var writes: [SecretKey] = []
     var deletes: [SecretKey] = []
     var afterWrite: ((SecretKey) throws -> Void)?
+    var beforeRead: ((SecretKey) throws -> Void)?
     var beforeWrite: ((SecretKey) throws -> Void)?
     var beforeDelete: ((SecretKey) throws -> Void)?
 
     func read(service: String, account: String) throws -> Data? {
-        values[SecretKey(service: service, account: account)]
+        let key = SecretKey(service: service, account: account)
+        try beforeRead?(key)
+        return values[key]
     }
 
     func write(_ data: Data, service: String, account: String) throws {

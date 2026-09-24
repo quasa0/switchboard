@@ -147,24 +147,17 @@ final class StorageTests: RepositoryTestCase {
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.path), ["replace.json"])
     }
 
-    func testFileCredentialFallbackRefusesSnapshotAndApplyWithoutChangingFilesOrKeychain() throws {
+    func testKeychainTakesPrecedenceAndLeavesStaleFileUntouched() throws {
         try seedLive(snapshot(), config: ["theme": "dark"])
-        let fallback = installation.configDirectory.appendingPathComponent(".credentials.json")
-        let fallbackData = try jsonData(["claudeAiOauth": jsonObject(snapshot("c").oauth)])
-        try privateWrite(fallbackData, to: fallback)
-        let originalValues = secrets.values
-        let originalConfig = try Data(contentsOf: installation.configFile)
-
-        XCTAssertThrowsError(try repository.live.snapshot()) { error in
-            XCTAssertTrue(error.localizedDescription.contains("file-based credential store"))
-        }
-        XCTAssertThrowsError(try repository.live.apply(snapshot("b"))) { error in
-            XCTAssertTrue(error.localizedDescription.contains("file-based credential store"))
-        }
-        XCTAssertEqual(secrets.values, originalValues)
-        XCTAssertEqual(try Data(contentsOf: installation.configFile), originalConfig)
-        XCTAssertEqual(try Data(contentsOf: fallback), fallbackData)
+        let file = installation.configDirectory.appendingPathComponent(".credentials.json")
+        let stale = Data("even an invalid fallback must not shadow Keychain".utf8)
+        try privateWrite(stale, to: file)
+        XCTAssertEqual(try repository.live.snapshot(), try snapshot())
+        try repository.live.apply(snapshot("b"))
+        XCTAssertEqual(try repository.live.snapshot(), try snapshot("b"))
+        XCTAssertEqual(try Data(contentsOf: file), stale)
     }
+
 }
 
 final class ClaudeInstallationTests: XCTestCase {
@@ -172,6 +165,7 @@ final class ClaudeInstallationTests: XCTestCase {
         let installation = ClaudeInstallation(home: URL(fileURLWithPath: "/synthetic/home"), environment: ["USER": "test-user"])
         XCTAssertEqual(installation.configDirectory.path, "/synthetic/home/.claude")
         XCTAssertEqual(installation.configFile.path, "/synthetic/home/.claude.json")
+        XCTAssertEqual(installation.credentialFile.path, "/synthetic/home/.claude/.credentials.json")
         XCTAssertEqual(installation.keychainService, "Claude Code-credentials")
         XCTAssertEqual(installation.keychainAccount, "test-user")
         XCTAssertTrue(installation.configurationEnvironment.isEmpty)
@@ -194,6 +188,7 @@ final class ClaudeInstallationTests: XCTestCase {
         ])
         XCTAssertEqual(installation.configFile.path, "/tmp/claude-profile/.claude.json")
         XCTAssertEqual(installation.keychainService, "Claude Code-credentials-6a836d2f")
+        XCTAssertEqual(installation.credentialFile.path, "/tmp/secure-store/.credentials.json")
         XCTAssertEqual(installation.configurationEnvironment.count, 2)
         XCTAssertNil(installation.configurationEnvironment["USER"])
         XCTAssertNil(installation.configurationEnvironment["UNRELATED_VARIABLE"])

@@ -113,7 +113,7 @@ public final class AccountRepository {
     public func recoverInterruptedSwitch() throws {
         guard let data = try secrets.read(service: vaultService, account: "pending-switch") else { return }
         let journal = try decoder.decode(PendingSwitch.self, from: data)
-        let credentials = try secrets.read(service: live.installation.keychainService, account: live.installation.keychainAccount)
+        let credentials = try live.credentialState().data
         let oauth = try credentials.map(jsonObject)?["claudeAiOauth"].map(jsonData)
         if oauth == journal.target.oauth {
             try live.apply(journal.target)
@@ -184,9 +184,8 @@ public final class AccountRepository {
         let state = try state()
         if state.activeID == id {
             if let current = try live.snapshot() { try capture(current) }
-            if let keychain = secrets as? KeychainStore {
-                try keychain.allowClaudeCLI(service: live.installation.keychainService, account: live.installation.keychainAccount)
-            }
+            // snapshot() already checked the active store. Do not reread Keychain
+            // just to grant access: the helper read never changed access permissions.
             return live.installation
         }
         let installation = usageInstallation(id)

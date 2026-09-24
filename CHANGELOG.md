@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.2
+
+- Support existing Claude file credential stores, with Keychain precedence and the correct secure-storage directory. Stale fallback files no longer block Keychain logins.
+- Preserve unrelated credentials, owner-only file permissions, rollback, and interrupted-switch recovery for file-based logins. Refuse detected concurrent login changes.
+- Retry Codex usage once after an HTTP 401 through the CLI’s token refresh. Preserve rotated credentials on failed usage reads.
+- Show sanitized Codex HTTP/RPC errors instead of suggesting every failure is an expired login.
+
 ## 0.5.1
 
 First downloadable public release.
