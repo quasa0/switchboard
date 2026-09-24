@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://switchboard.quasa0.com/sitemap.xml

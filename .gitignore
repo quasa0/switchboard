@@ -2,6 +2,9 @@
 /.build/
 /.swiftpm/
 /dist/
+.vercel/
+__pycache__/
+*.pyc
 .DS_Store
 xcuserdata/
 *.xcuserstate

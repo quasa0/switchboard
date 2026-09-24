@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Switchboard · Your AI accounts, together</title>
+    <meta
+      name="description"
+      content="A free, open-source Mac app for Claude Code and Codex. See usage, reset times, and subscription tiers. Switch accounts in one click."
+    />
+    <link rel="canonical" href="https://switchboard.quasa0.com/" />
+    <meta
+      property="og:title"
+      content="Switchboard · Your AI accounts, together"
+    />
+    <meta
+      property="og:description"
+      content="See your limits. Know what resets next. Switch Claude Code and Codex accounts from one native Mac app."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://switchboard.quasa0.com/" />
+    <meta
+      property="og:image"
+      content="https://switchboard.quasa0.com/assets/dashboard.png"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" href="/assets/icon.svg" type="image/svg+xml" />
+    <link
+      rel="preload"
+      href="/fonts/geist.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/script.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="header">
+      <div class="header-inner">
+        <a href="/" class="brand" aria-label="Switchboard home"
+          ><svg viewBox="0 0 32 32" aria-hidden="true">
+            <path d="M25 10H7m0 0 5-5m-5 5 5 5M7 22h18m0 0-5-5m5 5-5 5" /></svg
+          >Switchboard</a
+        >
+        <nav aria-label="Main navigation">
+          <a class="nav-link" href="#how-it-works">How it works</a>
+          <a class="nav-link" href="#agents">For agents</a>
+          <a
+            class="button small secondary"
+            href="https://github.com/quasa0/switchboard"
+            >GitHub <span aria-hidden="true">↗</span></a
+          >
+          <a class="button small" href="#install">Download</a>
+        </nav>
+      </div>
+    </header>
+    <main id="main">
+      <section class="hero hatch" aria-labelledby="hero-title">
+        <div class="hero-content">
+          <h1 id="hero-title">
+            All your AI accounts.<br />One place to switch.
+          </h1>
+          <p class="lede">
+            See your limits. Know what resets next. Switch between Claude Code
+            and Codex accounts from one native Mac app.
+          </p>
+          <div class="actions">
+            <a
+              class="button"
+              href="https://github.com/quasa0/switchboard/releases/download/v0.5.1/Switchboard-0.5.1-universal.dmg"
+              data-download="dmg"
+              ><svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 3v12m-5-5 5 5 5-5M5 16v4h14v-4" /></svg
+              >Download for Mac</a
+            >
+            <a class="button secondary" href="#agents"
+              >Let your agent install it <span aria-hidden="true">↗</span></a
+            >
+          </div>
+          <p class="hero-note">
+            Free and open source · macOS 14+ · Apple silicon &amp; Intel
+          </p>
+          <a class="quiet-link" href="#first-open"
+            >v0.5.1 · Not notarized. First-open instructions
+            <span aria-hidden="true">↗</span></a
+          >
+        </div>
+        <div class="platform-strip">
+          <span>One dashboard.</span><strong>Claude Code</strong
+          ><span class="strip-plus" aria-hidden="true">+</span
+          ><strong>Codex</strong><span>Your existing subscriptions.</span>
+        </div>
+      </section>
+      <div class="outer-frame hatch-soft">
+        <div class="frame">
+          <section class="demo hatch" aria-label="Switchboard app preview">
+            <figure class="screenshot">
+              <div class="window-bar">
+                <span class="traffic-lights" aria-hidden="true"
+                  ><i></i><i></i><i></i></span
+                ><span>Switchboard</span
+                ><span class="window-caption">Native macOS</span>
+              </div>
+              <img
+                src="/assets/dashboard.png"
+                width="2240"
+                height="1560"
+                alt="Switchboard in dark mode: Claude and ChatGPT account rows with selected accounts, remaining limits, reset dates, renewal dates, and manual reset credits."
+                fetchpriority="high"
+              />
+              <figcaption>
+                Actual app. Sample accounts. Your logins stay on your Mac.
+              </figcaption>
+            </figure>
+          </section>
+          <section id="how-it-works" aria-labelledby="workflow-title">
+            <div class="section-heading">
+              <span class="section-icon" aria-hidden="true">⇄</span>
+              <h2 id="workflow-title">Save once. Switch when you need to.</h2>
+              <p>
+                Use the subscriptions you already have.<br />No proxy to
+                configure. No new account to create.
+              </p>
+            </div>
+            <div class="card-grid hatch">
+              <article class="card">
+                <span class="step">01 / Connect</span>
+                <h3>Bring your accounts</h3>
+                <p>
+                  Save your current CLI login, or add another account through
+                  the official browser sign-in.
+                </p>
+                <div class="illustration provider-list" aria-hidden="true">
+                  <span>Claude Code <b>+</b></span
+                  ><span>Codex <b>+</b></span>
+                </div>
+              </article>
+              <article class="card">
+                <span class="step">02 / Compare</span>
+                <h3>See what’s available</h3>
+                <p>
+                  Compare remaining allowance, plan tiers, and exact reset times
+                  without opening multiple settings pages.
+                </p>
+                <div class="illustration example-meter" aria-hidden="true">
+                  <div><span>Weekly remaining</span><b>82%</b></div>
+                  <div class="meter"><span></span></div>
+                  <small>Resets in 2d 4h · Sep 27, 09:00</small>
+                </div>
+              </article>
+              <article class="card">
+                <span class="step">03 / Switch</span>
+                <h3>Choose your next account</h3>
+                <p>
+                  Close that provider’s CLI sessions. Select an account in
+                  Switchboard, then start a fresh session.
+                </p>
+                <div class="illustration example-selection" aria-hidden="true">
+                  <span>Personal <small>Switch →</small></span
+                  ><span>Studio <b>✓ Active</b></span>
+                </div>
+              </article>
+            </div>
+          </section>
+          <section class="details-grid" aria-label="What Switchboard shows">
+            <article>
+              <h3>The dates that matter</h3>
+              <p>
+                Quota reset countdowns and exact local times sit beside your
+                accounts. Claude billing dates can be connected separately.
+                Codex subscription periods appear when the provider supplies
+                them.
+              </p>
+            </article>
+            <article>
+              <h3>Reported, never guessed</h3>
+              <p>
+                Missing limits stay hidden after a successful check. Failed
+                checks keep their last snapshot with a warning. Codex reset
+                credits include their reported count and expiry dates.
+              </p>
+            </article>
+            <article>
+              <h3>A native app. A local vault.</h3>
+              <p>
+                Saved login snapshots live in macOS Keychain. Usage checks go
+                through the official CLIs. There is no Switchboard server,
+                account service, or telemetry in the app.
+              </p>
+            </article>
+            <article>
+              <h3>Open all the way down</h3>
+              <p>
+                SwiftUI, no package dependencies, and an MIT license. Build it
+                yourself, inspect the account-switching code, or make it yours.
+              </p>
+              <a href="https://github.com/quasa0/switchboard"
+                >Read the source <span aria-hidden="true">↗</span></a
+              >
+            </article>
+          </section>
+          <section
+            id="install"
+            class="install-section"
+            aria-labelledby="install-title"
+          >
+            <div class="section-heading">
+              <span class="section-icon" aria-hidden="true">↓</span>
+              <h2 id="install-title">A small app. A simple setup.</h2>
+              <p>
+                One universal download for Apple silicon and Intel.<br />Requires
+                macOS Sonoma 14 or later.
+              </p>
+            </div>
+            <div class="install-content">
+              <div class="download-panel">
+                <h3>Switchboard <span>0.5.1</span></h3>
+                <p>Free · MIT licensed · Universal Mac app</p>
+                <a
+                  class="button"
+                  href="https://github.com/quasa0/switchboard/releases/download/v0.5.1/Switchboard-0.5.1-universal.dmg"
+                  data-download="dmg"
+                  >Download .dmg <span aria-hidden="true">↓</span></a
+                >
+                <div class="download-alternatives">
+                  <a
+                    href="https://github.com/quasa0/switchboard/releases/download/v0.5.1/Switchboard-0.5.1-universal.zip"
+                    data-download="zip"
+                    >ZIP archive</a
+                  ><a
+                    href="https://github.com/quasa0/switchboard/releases/download/v0.5.1/SHA256SUMS.txt"
+                    >Checksums</a
+                  ><a
+                    href="https://github.com/quasa0/switchboard/releases/tag/v0.5.1"
+                    >Release notes</a
+                  >
+                </div>
+              </div>
+              <ol class="install-steps">
+                <li>
+                  <h3>Move it to Applications</h3>
+                  <p>Open the DMG and drag Switchboard into Applications.</p>
+                </li>
+                <li id="first-open">
+                  <h3>Approve the first open</h3>
+                  <p>
+                    This release is ad hoc signed, not Apple-notarized. Try
+                    opening it, then use
+                    <strong
+                      >System Settings → Privacy &amp; Security → Open
+                      Anyway</strong
+                    >
+                    if you trust the download.
+                    <a href="https://support.apple.com/en-us/102445"
+                      >Apple’s instructions ↗</a
+                    >
+                  </p>
+                </li>
+                <li>
+                  <h3>Add your first account</h3>
+                  <p>
+                    Install
+                    <a href="https://code.claude.com/docs/en/setup"
+                      >Claude Code</a
+                    >
+                    or
+                    <a href="https://github.com/openai/codex#quickstart"
+                      >Codex</a
+                    >
+                    for the provider you use. In Switchboard, choose
+                    <strong>Add account → Save current login</strong>, or sign
+                    in through the app.
+                  </p>
+                </li>
+              </ol>
+            </div>
+          </section>
+          <section
+            id="agents"
+            class="agent-section"
+            aria-labelledby="agent-title"
+          >
+            <div>
+              <span class="section-icon" aria-hidden="true">⌘</span>
+              <h2 id="agent-title">
+                Your agent can handle<br />the installation.
+              </h2>
+              <p>
+                Give this prompt to your coding agent. It can download, verify,
+                and install the app. You complete any macOS approvals and
+                account sign-ins.
+              </p>
+              <a href="/install.md"
+                >Read the agent instructions
+                <span aria-hidden="true">↗</span></a
+              >
+            </div>
+            <div class="prompt-panel">
+              <div class="prompt-heading">
+                <span>Copy into your agent</span
+                ><button
+                  class="copy-button"
+                  type="button"
+                  data-copy="agent-prompt"
+                  hidden
+                >
+                  Copy prompt
+                </button>
+              </div>
+              <p id="agent-prompt">
+                Install Switchboard on this Mac. Read
+                https://switchboard.quasa0.com/install.md and follow the
+                installation steps. Verify the download checksum. Preserve my
+                existing accounts and credentials.
+              </p>
+              <p
+                class="prompt-note"
+                role="status"
+                id="copy-status"
+                aria-live="polite"
+              >
+                Also available as <a href="/llms.txt">llms.txt</a>. No remote
+                script to pipe into a shell.
+              </p>
+            </div>
+          </section>
+          <section id="faq" class="faq" aria-labelledby="faq-title">
+            <div class="section-heading">
+              <h2 id="faq-title">A few things to know.</h2>
+            </div>
+            <div class="faq-list">
+              <details>
+                <summary>Does it change the account in my browser?</summary>
+                <p>
+                  No. It selects the login used by new Claude Code or Codex CLI
+                  sessions. Your browser and ChatGPT app stay signed into their
+                  own accounts. The ChatGPT section shows Codex allowances, not
+                  ChatGPT message quotas.
+                </p>
+              </details>
+              <details>
+                <summary>Can I switch during a running coding session?</summary>
+                <p>
+                  Close the provider’s sessions before switching. Running
+                  clients can keep credentials in memory and refresh tokens.
+                  Start a new session afterward. Switchboard does not kill your
+                  sessions or move an in-flight conversation.
+                </p>
+              </details>
+              <details>
+                <summary>Where are my credentials stored?</summary>
+                <p>
+                  Saved snapshots use macOS Keychain. Account metadata stays in
+                  Application Support with owner-only permissions. Isolated CLI
+                  profiles can also contain credential files while checking
+                  usage. Nothing is uploaded to a Switchboard service.
+                  <a
+                    href="https://github.com/quasa0/switchboard/blob/quasa0/main/docs/architecture.md"
+                    >Read the storage details.</a
+                  >
+                </p>
+              </details>
+              <details>
+                <summary>Do all subscription plans work?</summary>
+                <p>
+                  Switchboard reads the plan and limits your CLI reports. Claude
+                  requires Keychain-based login. Codex requires its file
+                  credential store. API-key logins and Codex keyring, auto, and
+                  ephemeral stores are not supported. Internal provider
+                  interfaces can change.
+                </p>
+              </details>
+              <details>
+                <summary>Can I build it myself?</summary>
+                <p>
+                  Yes. You need macOS 14+ and Swift 5.10 or newer through Xcode
+                  Command Line Tools. Clone the repository and run
+                  <code>./scripts/install.sh</code>.
+                  <a
+                    href="https://github.com/quasa0/switchboard#build-from-source"
+                    >Build instructions ↗</a
+                  >
+                </p>
+              </details>
+            </div>
+          </section>
+          <section class="closing-wrap">
+            <div class="closing dot-grid">
+              <h2>Know your limits.<br />Keep your work moving.</h2>
+              <p>Your subscriptions, ready when you need them.</p>
+              <a class="button inverse" href="#install"
+                >Get Switchboard <span aria-hidden="true">↗</span></a
+              >
+            </div>
+          </section>
+        </div>
+      </div>
+    </main>
+    <footer>
+      <div class="footer-inner">
+        <div>
+          <a href="/" class="brand"
+            ><svg viewBox="0 0 32 32" aria-hidden="true">
+              <path
+                d="M25 10H7m0 0 5-5m-5 5 5 5M7 22h18m0 0-5-5m5 5-5 5"
+              /></svg
+            >Switchboard</a
+          >
+          <p>
+            Made by <a href="https://github.com/quasa0">quasa0</a>. Free
+            software, under MIT.
+          </p>
+          <p>Independent project. Not affiliated with Anthropic or OpenAI.</p>
+        </div>
+        <nav aria-label="Resources">
+          <a href="https://github.com/quasa0/switchboard">Source code ↗</a
+          ><a href="https://github.com/quasa0/switchboard/issues"
+            >Report an issue ↗</a
+          ><a href="/install.md">Agent instructions</a
+          ><a
+            href="https://github.com/quasa0/switchboard/blob/quasa0/main/LICENSE"
+            >License</a
+          >
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>

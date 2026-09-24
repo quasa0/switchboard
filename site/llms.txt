@@ -1,0 +1,11 @@
+# Switchboard
+
+> A free, MIT-licensed macOS app to save and switch Claude Code and Codex subscription logins. macOS 14+, Apple silicon and Intel.
+
+- [Install Switchboard](https://switchboard.quasa0.com/install.md): Agent-readable steps, checksum verification, first-open approval, and source builds.
+- [Release manifest](https://switchboard.quasa0.com/release.json): Version, architecture, signing status, artifact URLs, SHA-256 hashes, and sizes.
+- [Source](https://github.com/quasa0/switchboard): SwiftUI app and synthetic tests.
+- [Usage](https://github.com/quasa0/switchboard/blob/quasa0/main/docs/usage.md): Save accounts, sign in, switch, and connect billing.
+- [Architecture](https://github.com/quasa0/switchboard/blob/quasa0/main/docs/architecture.md): Storage, account switching, usage provenance, and compatibility limits.
+
+Installation never requires existing account credentials. The user completes sign-in and Keychain prompts. Do not read, print, upload, remove, or modify existing CLI login files during installation. Do not disable Gatekeeper or remove quarantine attributes.

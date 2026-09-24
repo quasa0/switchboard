@@ -1,0 +1,28 @@
+name: Checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+      - name: Synthetic core tests
+        run: swift test
+      - name: Billing reader tests
+        run: node scripts/test-billing-reader.mjs
+      - name: Website and release contracts
+        run: python3 scripts/check-site.py
+      - name: Build without personal signing credentials
+        run: ./scripts/build.sh
+        env:
+          SWITCHBOARD_SIGNING_IDENTITY: "-"

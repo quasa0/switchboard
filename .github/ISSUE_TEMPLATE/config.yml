@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Private security report
+    url: https://github.com/quasa0/switchboard/security/advisories/new
+    about: Report vulnerabilities without exposing credentials in a public issue.

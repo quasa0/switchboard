@@ -1,96 +1,69 @@
 # Switchboard
 
-A native macOS app for saving and switching **Claude subscriptions in Claude Code** and **ChatGPT subscriptions in Codex**. All accounts appear together in a compact dashboard. Each provider keeps its own active login; click another account's row to switch it.
+**Your Claude Code and Codex accounts, together.**
 
-Licensed under the [MIT License](LICENSE). Switchboard is an independent project and is not affiliated with Anthropic or OpenAI.
+A native Mac app to compare subscription limits, see reset times, and switch the account used by your next CLI session. Free software under the [MIT license](LICENSE).
 
-Claude rows include weekly Fable, five-hour, weekly, and other reported model limits. ChatGPT rows show the Codex allowances attached to that subscription. Bars and percentages show **remaining allowance**. Reset countdowns and exact local dates stay visible beside each account's tier. A successful response that omits a window hides its meter; this does not establish that the plan has no such limit.
+[Download for Mac](https://switchboard.quasa0.com/#install) · [Website](https://switchboard.quasa0.com) · [Agent installation](https://switchboard.quasa0.com/install.md) · [Releases](https://github.com/quasa0/switchboard/releases)
 
-## Use it
+![Switchboard dashboard in dark mode with sample accounts](site/assets/dashboard.png)
 
-1. Open **Switchboard** from `~/Applications`.
-2. Compare the **Claude** and **ChatGPT** sections. Each marks its active account.
-3. Click **Add account**, choose a provider, then **Save current login** to save that CLI's current subscription login. Give it a name such as Personal. If no login is available, choose **Sign in to Claude Code** or **Sign in to Codex**.
-4. To add another account, click **Add account → Sign in another account**. Complete the official browser sign-in, return to Switchboard, and click **Save new login**.
-5. Quit open sessions for that provider. Click the saved account you want, then restart Claude Code or Codex. The other provider’s selected account stays unchanged.
+## Install
 
-For Claude, if your browser returns a login code, expand **Browser gave you a code?** and paste it. Codex returns through its local browser callback; it has no code-paste field in Switchboard. Finish or cancel any other Codex sign-in before starting one here.
+Requires **macOS 14+**. The download supports **Apple silicon and Intel**. Install Claude Code or Codex for each provider you want to use.
 
-Browser sessions can automatically choose the account already signed in. Check the saved email before switching. macOS can ask for Keychain access when Switchboard saves or reads an account.
+1. [Download Switchboard 0.5.1](https://github.com/quasa0/switchboard/releases/download/v0.5.1/Switchboard-0.5.1-universal.dmg).
+2. Open the DMG. Drag Switchboard into Applications.
+3. Open Switchboard. This release is **ad hoc signed and not notarized**. If macOS blocks it, use **System Settings → Privacy & Security → Open Anyway** after your first open attempt, if you trust the download. [Apple explains this step](https://support.apple.com/en-us/102445).
+4. Choose **Add account → Save current login**, or sign in through the app. Save each account before adding the next.
 
-Account tiers include their reported multiplier: Claude Pro · 1× or Max · 5×/20×; ChatGPT Plus · 1× or Pro · 5×/20×. Codex calls the smaller Pro tier `prolite`. Unknown plans keep their name without a guessed multiplier. These multipliers are provider-specific, not equivalent allowances across providers.
+[ZIP download](https://github.com/quasa0/switchboard/releases/download/v0.5.1/Switchboard-0.5.1-universal.zip) · [SHA-256 checksums](https://github.com/quasa0/switchboard/releases/download/v0.5.1/SHA256SUMS.txt)
 
-ChatGPT subscription periods are read automatically from the saved Codex ID token during the normal account refresh. **Period ends** is the provider-reported boundary; the token does not confirm that the plan will renew. The original observation time stays in the tooltip. An elapsed period is not rolled forward and does not mean that the CLI login expired.
+For a coding agent, paste: **Install Switchboard on this Mac. Read https://switchboard.quasa0.com/install.md and follow the steps. Verify the checksum and preserve existing credentials.**
 
-For each Claude account, choose **… → Connect billing**, sign into that account in the embedded Claude page, then click **Read billing**. This one-time web connection reads billing dates that the inspected CLI interface does not expose. Later Refresh actions update the dates through the same isolated web session. Gift subscriptions show **Gift covers through**; date-only coverage never gets an invented time. The app verifies both account and organization before saving metadata. A failed or expired web session preserves the last date and shows a billing warning.
+## What it does
 
-**… → Set renewal date** remains an optional manual override. Clearing it restores the automatic date. Billing dates are never inferred from token expiry, subscription creation, or quota resets. Editing an override or account name changes display metadata without reading credentials.
+- Shows Claude and ChatGPT subscription accounts on one screen, with a separate active account for each provider.
+- Displays remaining allowance, plan tiers, reset countdowns, and exact local dates. Claude includes Fable and other reported model limits.
+- Shows Codex manual reset credits and their expiry dates when supplied by the provider. It does not redeem credits.
+- Reads available subscription period dates. Claude billing dates use an optional, separate web sign-in. Manual overrides remain available.
+- Saves login snapshots in macOS Keychain. Uses the official CLIs for authentication and usage, without a proxy or model prompt.
 
-You can also sign in manually with `claude auth login --claudeai`, then save that current login. **Save each account before signing into the next. Do not run `claude auth logout` between them:** current Claude Code revokes refresh tokens on logout. For additional ChatGPT accounts, use Switchboard’s isolated sign-in so Codex does not replace or revoke the existing local login. Removing an account from Switchboard deletes its saved copy and leaves the active CLI login intact.
+**Close the provider’s running sessions before switching.** Select another account, then start a fresh Claude Code or Codex session. Switchboard does not change browser logins or migrate running conversations.
 
-## How it works
+The ChatGPT section shows **Codex allowances**, not ChatGPT message quotas. Missing usage stays unavailable; errors preserve the previous snapshot with a warning. Internal provider interfaces can change.
 
-Saved login snapshots use separate Mac Keychain services: `com.quasa0.switchboard.accounts` for Claude and `com.quasa0.switchboard.codex-accounts` for ChatGPT. Account names, emails, and usage snapshots are stored separately under `~/Library/Application Support/Switchboard`, with owner-only permissions. Those metadata files contain no tokens. Switchboard does not print tokens to logs.
+## Build from source
 
-Claude billing connections use one persistent WebKit website data store per saved account. Cookies remain in WebKit; the app does not copy cookies from your browser. Removing a saved Claude account also deletes its billing web session. The billing reader performs first-party GET requests only and retains an allowlist of dates and status fields, never payment methods, invoices, or authentication fields.
+Requires Swift 5.10+ through Xcode Command Line Tools. No Swift package dependencies.
 
-The Codex subscription claim names follow [CLIProxyAPI's ID-token parser](https://github.com/router-for-me/CLIProxyAPI/blob/main/internal/auth/codex/jwt_parser.go). Claude billing uses the first-party web app's `/api/organizations/{organizationUUID}/subscription_details` contract. These are internal provider formats and can change; missing metadata remains unavailable instead of being guessed.
+```sh
+git clone https://github.com/quasa0/switchboard.git
+cd switchboard
+./scripts/install.sh
+```
 
-### Claude Code
+This installs `~/Applications/Switchboard.app`. Quit Switchboard before installing an update. Local builds use an available Apple Development identity, or ad hoc signing. Set `SWITCHBOARD_SIGNING_IDENTITY=-` to explicitly use ad hoc signing. Public release packaging always uses ad hoc signing and does not include a personal development certificate.
 
-- Adding an account uses a separate CLI configuration and Keychain namespace. It leaves the current Claude Code login active. Switchboard owns and stops the sign-in subprocess.
-- Switching first saves the latest current credentials. It changes `claudeAiOauth` in Claude’s credential entry and `oauthAccount` in Claude’s config. It preserves unrelated credentials, preferences, projects, and MCP settings. It clears account-specific caches and Anthropic device/gateway credentials. Organizations that require trusted-device enrollment may need to enroll again.
-- Claude’s credential entry is read and written through Apple’s `security` helper, as Claude Code expects. Credential JSON uses compact ASCII encoding. Writes send data through stdin and reject entries that exceed the helper’s command limit before changing anything. Saved Switchboard snapshots use the native Keychain API.
-- A switch saves the previous login and an interruption journal in Keychain. Failed config writes roll back the credential write. The next launch completes or rolls back an interrupted switch when its recorded credentials still match. It refuses to overwrite a login changed by another process during recovery.
-- Usage comes from the **unmodified Claude Code CLI**, through its experimental `get_usage` control request. No model prompt is sent. Claude Code performs its own token refresh. Each inactive account uses a separate configuration for this check.
+## Develop and verify
 
-### ChatGPT through Codex
+```sh
+swift test
+node scripts/test-billing-reader.mjs
+python3 scripts/check-site.py
+SWITCHBOARD_SIGNING_IDENTITY=- ./scripts/build.sh
+./scripts/ui-smoke.sh dist/Switchboard.app
+```
 
-- Switchboard supports Codex’s **file credential store**. The active subscription login is in `auth.json` under `CODEX_HOME`, normally `~/.codex/auth.json`. Settings that select `keyring`, `auto`, or `ephemeral`, unrecognized storage settings, and enforced login/workspace restrictions are rejected without changing the login or configuration. Switchboard does not probe Codex’s Keychain entry. See [Codex authentication](https://learn.chatgpt.com/docs/auth).
-- Adding an account runs the official `codex login` command in a new, empty, isolated `CODEX_HOME`. The existing login is never copied into that sign-in folder. This keeps the old login out of the replacement/revocation path. The browser handles authentication; **Save new login** collects the completed login into the ChatGPT vault.
-- Switching saves the current credentials, checks that the live file has not changed, and atomically replaces only `auth.json` with owner-only permissions. The complete selected payload is preserved. Codex configuration and conversations are unchanged. Close existing Codex sessions before switching to avoid concurrent token refreshes.
-- Usage comes from the official Codex App Server over its local stdio connection: `account/read` followed by `account/rateLimits/read`. It starts no conversation and sends no model prompt. Codex handles token refresh. See the [App Server account and rate-limit API](https://learn.chatgpt.com/docs/app-server).
-- The active account’s usage check uses its live auth file. Inactive accounts use private profile files. Refreshed credentials are collected into the saved vault, including when the subsequent usage read fails. These working `auth.json` files contain tokens and have owner-only permissions; the saved account metadata does not.
+These checks use synthetic accounts. They do not read real logins or exercise Keychain. Open `.build/debug/Switchboard --demo` for an interactive preview; quit with ⌘Q. The separate `scripts/smoke.sh` credential test **does** write synthetic secrets to temporary Keychain namespaces and may trigger system prompts. Run it only when testing credential storage intentionally.
 
-## Limits and freshness
+## Documentation
 
-Claude Code 2.1.280 may answer usage from a cache younger than 60 seconds, or use a matching-account cache up to one hour old when a network request fails. Its control response omits provenance. **Checked** means the CLI was queried; it does not guarantee a new server response.
+- [User guide](docs/usage.md): add accounts, switch, connect billing, and interpret tiers.
+- [Architecture and compatibility](docs/architecture.md): storage, rollback, protocol details, and freshness limits.
+- [Contributing](CONTRIBUTING.md): structure, checks, and issue reports.
+- [Security policy](SECURITY.md): sensitive data and private vulnerability reporting.
+- [Releasing](docs/releasing.md): universal packages, checksums, and website deployment.
+- [Changelog](CHANGELOG.md).
 
-Codex returns named quota windows with their duration, usage percentage, and next reset timestamp. Five-hour and weekly windows appear in their matching columns. Other durations and named limits retain their reported meaning rather than being relabeled as weekly limits. **These are Codex allowances attached to a ChatGPT subscription, not chatgpt.com message quotas.** Switchboard does not change browser sessions or the ChatGPT app’s account.
-
-Codex manual resets show the provider's available count and individual credit expiry dates. A missing response stays unavailable; it is not displayed as zero. The count remains authoritative even if the detail list is incomplete. The app only reads this data; it does not redeem resets. Claude's inspected usage interface does not expose equivalent manual-reset details.
-
-Unavailable usage remains unavailable, never a fabricated zero. Failed checks retain the last snapshot with a visible warning. If a later successful response adds a previously absent quota window, its meter returns automatically.
-
-Reset countdowns and checked ages update locally once a minute. This display update does not query either CLI or Keychain. When a saved reset time passes, the app asks you to refresh; it does not assume that usage has returned to zero.
-
-Existing Claude Code processes keep authentication in memory and can refresh their tokens. Quit them before switching. Switchboard does not terminate your sessions or migrate an in-flight conversation. Run `claude --continue` after restarting if you want to continue the latest conversation in the same project.
-
-Embedded clients also need a fresh Claude session after switching. Restart the client's Claude session so it reads the selected login. Restarting a session does not repair invalid credentials.
-
-Claude support requires macOS Keychain logins. If Claude has a `.credentials.json` fallback in the selected configuration, the app stops rather than guessing which store to modify. Custom `CLAUDE_CONFIG_DIR`, `CLAUDE_SECURESTORAGE_CONFIG_DIR`, and `CODEX_HOME` values are supported when passed to the app process; a Finder launch uses the default configuration. Environment-based API keys and provider settings in your terminal can override subscription authentication independently of Switchboard.
-
-Claude’s local credential format and `get_usage` protocol are not stable public APIs. The implementation was checked against installed Claude Code **2.1.280**. Recheck these interfaces after major CLI changes. No proxy, model routing, automatic account rotation, public service, or shared credential server is involved.
-
-## Build and verify
-
-Requires macOS 14+, Swift 5.10+ / Xcode Command Line Tools, and the CLI for each provider you use: Claude Code or Codex. No package dependencies.
-
-- `swift test` runs synthetic account, persistence, protocol, and process-cleanup tests. `node scripts/test-billing-reader.mjs` checks the actual web billing reader with mocked network responses. Neither reads real credentials.
-- `./scripts/ui-smoke.sh "$HOME/Applications/Switchboard.app"` checks in-memory UI actions and independent active accounts, renders the combined dashboard in light/dark and exceptional states, and verifies normal quit cleanup. It never initializes either account engine or accesses credentials. Use this for visual work.
-- `./scripts/install.sh` builds, signs with an available Apple Development identity (or ad hoc), and installs `~/Applications/Switchboard.app`. Quit the app before rebuilding it.
-- `./scripts/smoke.sh "$HOME/Applications/Switchboard.app"` runs the Claude credential smoke with synthetic accounts. It exercises **real Keychain** writes in unique temporary namespaces, verifies switching and token preservation, removes test secrets, and renders light/dark/empty UI previews. It never reads your Claude login. This is separate from the credential-free UI smoke and can cause Keychain permission prompts.
-- `.build/debug/Switchboard --demo` opens an interactive preview with sample accounts and no credential access. Quit it with ⌘Q.
-
-The app uses no background daemon or login item. Codex browser sign-in temporarily uses its official localhost callback on port 1455; usage checks use stdio. Closing the window keeps the menu bar available. **Quit Switchboard** or ⌘Q stops the app and its owned subprocesses.
-
-## References
-
-- [Claude Code authentication and credential storage](https://code.claude.com/docs/en/authentication#credential-management)
-- [Claude Code CLI reference](https://code.claude.com/docs/en/cli-reference)
-- [Codex authentication and credential storage](https://learn.chatgpt.com/docs/auth)
-- [Codex App Server account and rate-limit API](https://learn.chatgpt.com/docs/app-server)
-- [Vercel design guidance](https://vercel.com/design.md)
-- [Theo’s original dashboard post](https://x.com/theo/status/2095969972841525526) and [fork comment](https://x.com/theo/status/2095975684967673991)
-
-Claude storage, cache invalidation, namespace hashing, and usage-protocol details were also verified by inspecting the installed Claude Code executable. Synthetic tests use isolated credential namespaces or temporary file stores. Live usage checks use the accounts that the user has explicitly saved.
+The website adapts the owner’s FastClip landing design. It uses a self-hosted Geist font under the [SIL Open Font License](site/fonts/OFL.txt). The app and remaining repository code are MIT licensed. Switchboard is an independent project, not affiliated with Anthropic or OpenAI.

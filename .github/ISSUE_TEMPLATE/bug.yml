@@ -1,0 +1,25 @@
+name: Bug report
+description: Report a reproducible problem using sanitized details.
+body:
+  - type: markdown
+    attributes:
+      value: Never attach tokens, auth.json, cookies, Keychain output, or screenshots of real account details. Use private vulnerability reporting for security issues.
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Switchboard, macOS, architecture, and the relevant CLI version.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction
+      description: Steps, expected result, and actual result. Use sample account names.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized error message
+      description: Remove personal addresses, paths, account IDs, and credentials.
