@@ -45,6 +45,8 @@ for path in sorted(page.paths | {'/install.md','/llms.txt','/release.json','/fon
         assert 'text/plain' in asset_headers.get('Content-Type',''), 'Agent instructions are not plain text'
     if path == '/release.json':
         manifest = json.loads(data)
+    local = pathlib.Path(__file__).resolve().parent.parent / 'site' / path.lstrip('/')
+    assert data == local.read_bytes(), f'Deployed asset differs from repository: {path}'
 print('PASS: entry, CSS, JavaScript, image, font, license, agent docs, and metadata', flush=True)
 expected = json.loads((pathlib.Path(__file__).resolve().parent.parent/'site/release.json').read_text())
 assert manifest == expected, 'Deployed release manifest differs from repository'

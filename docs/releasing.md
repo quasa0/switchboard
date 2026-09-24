@@ -20,7 +20,7 @@ Verify the remote release metadata, download both artifacts, and compare their h
 
 `site/` is a standalone static Vercel project. Deploy **only that directory**. It contains no auth, backend API, analytics, or package dependencies. Never deploy the repository root or local `artifacts/`.
 
-Run `python3 scripts/check-site.py` before deployment. Link the directory to the intended Vercel project, then run `./scripts/deploy-site.sh`. That script deploys and automatically runs `scripts/smoke-site.py` against the resulting production deployment and canonical domain. Configure `switchboard.quasa0.com` as a production domain before using it.
+Run `python3 scripts/check-site.py` before deployment. Link the directory to the intended Vercel project, then run `./scripts/deploy-site.sh`. That script deploys, checks the new deployment's canonical alias, and automatically runs `scripts/smoke-site.py` against the public domain. Generated deployment URLs can require Vercel login; their protection stays enabled. Configure `switchboard.quasa0.com` as a production domain before using it.
 
 The smoke fetches the page, CSS, JavaScript, font, screenshot, agent docs, manifest, and every published download. It verifies nonempty assets and SHA-256 checksums. There is no authenticated site API or realtime connection to test. Also inspect desktop/mobile and light/dark browser views, copy-prompt behavior, navigation, and downloads. A health response alone is not a successful release.
 
