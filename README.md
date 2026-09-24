@@ -2,6 +2,8 @@
 
 A native macOS app for saving and switching **Claude subscriptions in Claude Code** and **ChatGPT subscriptions in Codex**. All accounts appear together in a compact dashboard. Each provider keeps its own active login; click another account's row to switch it.
 
+Licensed under the [MIT License](LICENSE). Switchboard is an independent project and is not affiliated with Anthropic or OpenAI.
+
 Claude rows include weekly Fable, five-hour, weekly, and other reported model limits. ChatGPT rows show the Codex allowances attached to that subscription. Bars and percentages show **remaining allowance**. Reset countdowns and exact local dates stay visible beside each account's tier. A successful response that omits a window hides its meter; this does not establish that the plan has no such limit.
 
 ## Use it
@@ -64,7 +66,7 @@ Reset countdowns and checked ages update locally once a minute. This display upd
 
 Existing Claude Code processes keep authentication in memory and can refresh their tokens. Quit them before switching. Switchboard does not terminate your sessions or migrate an in-flight conversation. Run `claude --continue` after restarting if you want to continue the latest conversation in the same project.
 
-Embedded clients also need a fresh Claude session after switching. In T3 Code, right-click the affected thread and select **Settle thread**, then **Un-settle thread**. The next message resumes its saved conversation with a fresh Claude process. This restarts a session; it does not repair invalid credentials.
+Embedded clients also need a fresh Claude session after switching. Restart the client's Claude session so it reads the selected login. Restarting a session does not repair invalid credentials.
 
 Claude support requires macOS Keychain logins. If Claude has a `.credentials.json` fallback in the selected configuration, the app stops rather than guessing which store to modify. Custom `CLAUDE_CONFIG_DIR`, `CLAUDE_SECURESTORAGE_CONFIG_DIR`, and `CODEX_HOME` values are supported when passed to the app process; a Finder launch uses the default configuration. Environment-based API keys and provider settings in your terminal can override subscription authentication independently of Switchboard.
 

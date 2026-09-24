@@ -1,0 +1,9 @@
+title = "Switchboard secret scanning"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Public Anthropic subscription-tier identifier; not a credential"
+regexTarget = "secret"
+regexes = ['''^default_claude_max_20x$''']

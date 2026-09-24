@@ -1,14 +1,15 @@
 # Build products and Finder metadata
 /.build/
+/.swiftpm/
 /dist/
 .DS_Store
+xcuserdata/
+*.xcuserstate
 
-# Generated previews and smoke output; keep reviewed Markdown reports.
-/artifacts/**/*.png
-/artifacts/**/*.jpg
-/artifacts/**/*.jpeg
-/artifacts/ui-smoke/
-/artifacts/smoke-*.json
+# Local operational notes, captures, and verification output can contain account data.
+/worklog.md
+/artifacts/
+*.log
 
 # Local account stores and environment files. Synthetic Swift fixtures stay tracked.
 .codex/
@@ -29,7 +30,9 @@ credentials.json
 *.pfx
 *.pem
 *.key
-/accounts.json
+accounts.json
+cookies.json
+*.har
 /profiles/
 /login/
 /credentials/
