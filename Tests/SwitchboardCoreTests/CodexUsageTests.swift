@@ -1,0 +1,296 @@
+import XCTest
+import Foundation
+import Darwin
+@testable import SwitchboardCore
+
+final class CodexUsageTests: XCTestCase {
+    func testMainWindowsUseActualDurationAndUnixSeconds() throws {
+        let result = try CodexUsageClient.parseUsageResponse(Data(Self.reply.utf8), fetchedAt: Date(timeIntervalSince1970: 100))
+        XCTAssertEqual(result.fiveHour?.utilization, 12)
+        XCTAssertEqual(result.fiveHour?.fraction, 0.12)
+        XCTAssertEqual(result.sevenDay?.utilization, 103)
+        XCTAssertEqual(result.sevenDay?.fraction, 1)
+        XCTAssertEqual(result.fiveHour?.resetsAt, Date(timeIntervalSince1970: 1_790_000_000))
+        XCTAssertNil(result.sevenDay?.resetsAt)
+        XCTAssertEqual(result.fetchedAt, Date(timeIntervalSince1970: 100))
+        XCTAssertTrue(result.modelScoped.isEmpty)
+    }
+
+    func testMapTakesPrecedenceAndRetainsAllNamedBuckets() throws {
+        let reply = """
+        {"result":{
+          "rateLimits":{"limitId":"codex","primary":{"usedPercent":99,"windowDurationMins":300}},
+          "rateLimitsByLimitId":{
+            "zeta":{"limitName":"Research","primary":{"usedPercent":8,"windowDurationMins":10080}},
+            "codex":{"secondary":{"usedPercent":31,"windowDurationMins":300}},
+            "alpha":{"normalModelSlug":"Fast model","primary":{"usedPercent":14,"windowDurationMins":60}}
+          }
+        }}
+        """
+        let result = try CodexUsageClient.parseUsageResponse(Data(reply.utf8))
+        XCTAssertEqual(result.fiveHour?.utilization, 31)
+        XCTAssertEqual(result.modelScoped.map(\.name), ["Fast model · 1-hour limit", "Research · weekly limit"])
+        XCTAssertEqual(result.modelScoped.map(\.window.utilization), [14, 8])
+    }
+
+    func testUnknownDurationsRemainUnknownInsteadOfFiveHourOrWeekly() throws {
+        let reply = """
+        {"result":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":0},"secondary":{"usedPercent":41,"windowDurationMins":null}}}}
+        """
+        let result = try CodexUsageClient.parseUsageResponse(Data(reply.utf8))
+        XCTAssertNil(result.fiveHour)
+        XCTAssertNil(result.sevenDay)
+        XCTAssertEqual(result.modelScoped.map(\.name), ["Codex · primary limit · duration unavailable", "Codex · secondary limit · duration unavailable"])
+        XCTAssertEqual(result.modelScoped.first?.window.utilization, 0)
+    }
+
+    func testDistinctBucketsWithMatchingLabelsAndValuesArePreserved() throws {
+        let reply = """
+        {"result":{"rateLimitsByLimitId":{
+          "a":{"limitName":"Model","primary":{"usedPercent":20,"windowDurationMins":60}},
+          "b":{"limitName":"Model","primary":{"usedPercent":20,"windowDurationMins":60}}
+        }}}
+        """
+        let result = try CodexUsageClient.parseUsageResponse(Data(reply.utf8))
+        XCTAssertEqual(result.modelScoped.count, 2)
+    }
+
+    func testSpecificBucketCannotMasqueradeAsGeneralFiveHourLimit() throws {
+        let reply = """
+        {"result":{"rateLimits":{"limitId":"codex_model","limitName":"Special model","primary":{"usedPercent":75,"windowDurationMins":300}}}}
+        """
+        let result = try CodexUsageClient.parseUsageResponse(Data(reply.utf8))
+        XCTAssertNil(result.fiveHour)
+        XCTAssertEqual(result.modelScoped.first?.name, "Special model · 5-hour limit")
+    }
+
+    func testNonstandardWindowDurationsStayVisible() throws {
+        let reply = """
+        {"result":{"rateLimits":{"primary":{"usedPercent":25,"windowDurationMins":15},"secondary":{"usedPercent":80,"windowDurationMins":2880}}}}
+        """
+        let result = try CodexUsageClient.parseUsageResponse(Data(reply.utf8))
+        XCTAssertEqual(result.modelScoped.map(\.name), ["Codex · 15-minute limit", "Codex · 2-day limit"])
+    }
+
+    func testNullOrMissingUsageDoesNotBecomeZero() {
+        for reply in ["{\"result\":{}}", "{\"result\":{\"rateLimits\":{\"primary\":null,\"secondary\":null}}}"] {
+            XCTAssertThrowsError(try CodexUsageClient.parseUsageResponse(Data(reply.utf8)))
+        }
+    }
+
+    func testInvalidPercentDurationAndResetDateAreRejected() {
+        for window in ["{\"usedPercent\":-1}", "{\"usedPercent\":25,\"windowDurationMins\":0}", "{\"usedPercent\":25,\"resetsAt\":-10}"] {
+            let reply = "{\"result\":{\"rateLimits\":{\"primary\":\(window)}}}"
+            XCTAssertThrowsError(try CodexUsageClient.parseUsageResponse(Data(reply.utf8)))
+        }
+    }
+
+    func testErrorsAndUnsupportedShapesNeverExposeRawContents() {
+        let secret = "synthetic-secret-must-not-appear"
+        for reply in ["{\"error\":{\"code\":-32600,\"message\":\"\(secret)\"}}", "{\"result\":{\"rateLimits\":\"\(secret)\"}}"] {
+            XCTAssertThrowsError(try CodexUsageClient.parseUsageResponse(Data(reply.utf8))) { error in
+                XCTAssertFalse(error.localizedDescription.contains(secret))
+            }
+        }
+    }
+
+    func testAccountOnlyProtocolUsesSelectedAuthAndNormalQuit() async throws {
+        let fixture = try Fixture(script: Self.protocolPreamble + """
+        assert os.environ['CODEX_HOME'] == str(Path(__file__).parent / 'profile')
+        assert os.environ['HOME'] == str(Path(__file__).parent / 'profile' / 'home')
+        assert os.environ['CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED'] == '1'
+        assert not any(k in os.environ for k in ['OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL', 'CODEX_LOGIN_ISSUER', 'CODEX_APP_SERVER_URL', 'ANTHROPIC_API_KEY'])
+        assert Path.cwd().name.startswith('switchboard-codex-usage-')
+        for override in ['cli_auth_credentials_store="file"', 'model_provider="openai"', 'chatgpt_base_url="https://chatgpt.com/backend-api"', 'features.plugins=false', 'features.apps=false', 'features.hooks=false', 'analytics.enabled=false', 'feedback.enabled=false']:
+            assert override in sys.argv
+        assert sys.argv[-3:] == ['app-server', '--listen', 'stdio://']
+        print(json.dumps({'method':'account/updated','params':{}}), flush=True)
+        request = handshake()
+        assert request['method'] == 'account/rateLimits/read'
+        assert request['params'] == {'excludeResetCreditDetails':True}
+        Path(os.environ['CODEX_HOME'], 'auth.json').write_text('synthetic-refreshed-auth')
+        reply = json.loads(\(Self.pythonString(Self.reply)))
+        reply['id'] = request['id']
+        print(json.dumps(reply), flush=True)
+        assert sys.stdin.read() == ''
+        Path(__file__ + '.clean-exit').write_text('yes')
+        """)
+        defer { fixture.remove() }
+        let result = try await CodexUsageClient(executable: fixture.executable).fetch(installation: fixture.installation)
+        XCTAssertEqual(result.fiveHour?.utilization, 12)
+        XCTAssertEqual(try String(contentsOf: fixture.installation.authFile, encoding: .utf8), "synthetic-refreshed-auth")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.executable.path + ".clean-exit"))
+        try fixture.assertChildStopped()
+    }
+
+    func testRPCErrorPreservesRefreshedAuthAndHidesDiagnostics() async throws {
+        let fixture = try Fixture(script: Self.protocolPreamble + """
+        request = handshake()
+        Path(os.environ['CODEX_HOME'], 'auth.json').write_text('synthetic-refreshed-auth')
+        print('synthetic-secret-must-not-appear', file=sys.stderr, flush=True)
+        print(json.dumps({'id':request['id'], 'error':{'code':-32603,'message':'synthetic-secret-must-not-appear'}}), flush=True)
+        sys.stdin.read()
+        """)
+        defer { fixture.remove() }
+        do {
+            _ = try await CodexUsageClient(executable: fixture.executable).fetch(installation: fixture.installation)
+            XCTFail("Expected RPC failure")
+        } catch {
+            XCTAssertFalse(error.localizedDescription.contains("synthetic-secret-must-not-appear"))
+        }
+        XCTAssertEqual(try String(contentsOf: fixture.installation.authFile, encoding: .utf8), "synthetic-refreshed-auth")
+        try fixture.assertChildStopped()
+    }
+
+    func testNonChatGPTLoginStopsBeforeUsageRequest() async throws {
+        let fixture = try Fixture(script: Self.protocolPreamble + """
+        first = json.loads(sys.stdin.readline())
+        print(json.dumps({'id':first['id'],'result':{}}), flush=True)
+        assert json.loads(sys.stdin.readline())['method'] == 'initialized'
+        account = json.loads(sys.stdin.readline())
+        print(json.dumps({'id':account['id'],'result':{'account':{'type':'apiKey'},'requiresOpenaiAuth':True}}), flush=True)
+        assert sys.stdin.read() == ''
+        Path(__file__ + '.no-usage').write_text('yes')
+        """)
+        defer { fixture.remove() }
+        do {
+            _ = try await CodexUsageClient(executable: fixture.executable).fetch(installation: fixture.installation)
+            XCTFail("Expected subscription requirement")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("ChatGPT"))
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.executable.path + ".no-usage"))
+        try fixture.assertChildStopped()
+    }
+
+    func testTimeoutReapsSIGTERMResistantChild() async throws {
+        let fixture = try Fixture(script: Self.protocolPreamble + """
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        time.sleep(60)
+        """)
+        defer { fixture.remove() }
+        do {
+            _ = try await CodexUsageClient(executable: fixture.executable, timeout: 0.25).fetch(installation: fixture.installation)
+            XCTFail("Expected timeout")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("in time"))
+        }
+        try fixture.assertChildStopped()
+    }
+
+    func testCancellationReapsChild() async throws {
+        let fixture = try Fixture(script: Self.protocolPreamble + "time.sleep(60)\n")
+        defer { fixture.remove() }
+        let task = Task { try await CodexUsageClient(executable: fixture.executable).fetch(installation: fixture.installation) }
+        for _ in 0..<100 {
+            if FileManager.default.fileExists(atPath: fixture.pidFile.path) { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        task.cancel()
+        do {
+            _ = try await task.value
+            XCTFail("Expected cancellation")
+        } catch is CancellationError {} catch {
+            XCTFail("Expected cancellation; received \(error.localizedDescription)")
+        }
+        try fixture.assertChildStopped()
+    }
+
+    func testEarlyExitDoesNotSignalParent() async throws {
+        let fixture = try Fixture(script: Self.protocolPreamble + "sys.exit(0)\n")
+        defer { fixture.remove() }
+        do {
+            _ = try await CodexUsageClient(executable: fixture.executable).fetch(installation: fixture.installation)
+            XCTFail("Expected closed channel")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("closed"))
+        }
+        try fixture.assertChildStopped()
+    }
+
+    func testOversizedLineIsBoundedAndChildIsReaped() async throws {
+        let fixture = try Fixture(script: Self.protocolPreamble + """
+        sys.stdout.write('x' * (1024 * 1024 + 1))
+        sys.stdout.flush()
+        time.sleep(60)
+        """)
+        defer { fixture.remove() }
+        do {
+            _ = try await CodexUsageClient(executable: fixture.executable).fetch(installation: fixture.installation)
+            XCTFail("Expected bounded output")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("too much output"))
+        }
+        try fixture.assertChildStopped()
+    }
+
+    func testStderrOutputIsBoundedAndDiscarded() async throws {
+        let fixture = try Fixture(script: Self.protocolPreamble + """
+        sys.stderr.write('synthetic-private-diagnostic' * 100000)
+        sys.stderr.flush()
+        time.sleep(60)
+        """)
+        defer { fixture.remove() }
+        do {
+            _ = try await CodexUsageClient(executable: fixture.executable).fetch(installation: fixture.installation)
+            XCTFail("Expected bounded output")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("too much output"))
+            XCTAssertFalse(error.localizedDescription.contains("synthetic-private-diagnostic"))
+        }
+        try fixture.assertChildStopped()
+    }
+
+    private static let protocolPreamble = """
+    import json, os, signal, sys, time
+    from pathlib import Path
+    Path(__file__ + '.pid').write_text(str(os.getpid()))
+    def handshake():
+        first = json.loads(sys.stdin.readline())
+        assert first['method'] == 'initialize'
+        assert first['params']['clientInfo']['name'] == 'switchboard'
+        print(json.dumps({'id':first['id'],'result':{}}), flush=True)
+        assert json.loads(sys.stdin.readline()) == {'method':'initialized'}
+        account = json.loads(sys.stdin.readline())
+        assert account['method'] == 'account/read'
+        assert account['params'] == {'refreshToken':False}
+        print(json.dumps({'id':account['id'],'result':{'account':{'type':'chatgpt','email':'sample@example.test','planType':'plus'},'requiresOpenaiAuth':True}}), flush=True)
+        return json.loads(sys.stdin.readline())
+
+    """
+
+    private static let reply = """
+    {"result":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":103,"windowDurationMins":10080,"resetsAt":null},"secondary":{"usedPercent":12,"windowDurationMins":300,"resetsAt":1790000000}}}}
+    """
+
+    private static func pythonString(_ string: String) -> String {
+        String(data: try! JSONSerialization.data(withJSONObject: string, options: [.fragmentsAllowed]), encoding: .utf8)!
+    }
+
+    private struct Fixture {
+        let directory: URL
+        let executable: URL
+        let installation: CodexInstallation
+        var pidFile: URL { URL(fileURLWithPath: executable.path + ".pid") }
+
+        init(script: String) throws {
+            directory = FileManager.default.temporaryDirectory.appendingPathComponent("switchboard-codex-usage-test-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+            executable = directory.appendingPathComponent("fixture")
+            try Data(("#!/usr/bin/env python3\n" + script + "\n").utf8).write(to: executable)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+            installation = .isolated(at: directory.appendingPathComponent("profile"))
+            try FileManager.default.createDirectory(at: installation.home.appendingPathComponent("home"), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            try Data("synthetic-original-auth".utf8).write(to: installation.authFile)
+        }
+
+        func assertChildStopped(file: StaticString = #filePath, line: UInt = #line) throws {
+            let contents = try String(contentsOf: pidFile, encoding: .utf8)
+            let pid = try XCTUnwrap(Int32(contents), file: file, line: line)
+            XCTAssertEqual(kill(pid, 0), -1, file: file, line: line)
+            XCTAssertEqual(errno, ESRCH, file: file, line: line)
+        }
+
+        func remove() { try? FileManager.default.removeItem(at: directory) }
+    }
+}

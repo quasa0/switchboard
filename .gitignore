@@ -1,0 +1,36 @@
+# Build products and Finder metadata
+/.build/
+/dist/
+.DS_Store
+
+# Generated previews and smoke output; keep reviewed Markdown reports.
+/artifacts/**/*.png
+/artifacts/**/*.jpg
+/artifacts/**/*.jpeg
+/artifacts/ui-smoke/
+/artifacts/smoke-*.json
+
+# Local account stores and environment files. Synthetic Swift fixtures stay tracked.
+.codex/
+.claude/
+auth.json
+.credentials.json
+credentials.json
+.env
+.env.*
+.envrc
+.envrc.local
+!.env.example
+!.env.sample
+*.keychain
+*.keychain-db
+*.p8
+*.p12
+*.pfx
+*.pem
+*.key
+/accounts.json
+/profiles/
+/login/
+/credentials/
+/secrets/
