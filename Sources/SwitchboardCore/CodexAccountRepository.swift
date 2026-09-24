@@ -114,6 +114,15 @@ public final class CodexAccountRepository {
         try save(accounts)
     }
 
+    public func setRenewal(_ id: UUID, date: Date?) throws {
+        var accounts = try accounts()
+        guard let index = accounts.firstIndex(where: { $0.id == id }) else {
+            throw SwitchboardError.message("This ChatGPT account is no longer saved.")
+        }
+        accounts[index].renewalAt = date
+        try save(accounts)
+    }
+
     public func remove(_ id: UUID) throws {
         guard usageChecks[id] == nil else { throw SwitchboardError.message("Wait for this account's usage check to finish before removing it.") }
         let existing = try accounts()

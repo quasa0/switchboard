@@ -18,6 +18,7 @@ actor AccountEngine: SubscriptionEngine {
         try repository.withLock { try repository.activate(id) }
     }
     func rename(_ id: UUID, label: String) throws { try repository.withLock { try repository.rename(id, label: label) } }
+    func setRenewal(_ id: UUID, date: Date?) throws { try repository.withLock { try repository.setRenewal(id, date: date) } }
     func remove(_ id: UUID) throws { try repository.withLock { try repository.remove(id) } }
     func usage(_ id: UUID) async throws {
         refreshing = true
@@ -62,7 +63,7 @@ actor AccountEngine: SubscriptionEngine {
 }
 
 @MainActor final class AppModel: ObservableObject {
-    @Published private(set) var provider: SubscriptionProvider
+    let provider: SubscriptionProvider
     @Published var accounts: [SavedAccount] = []
     @Published var activeID: UUID?
     @Published var switchingAccountID: UUID?
@@ -76,56 +77,27 @@ actor AccountEngine: SubscriptionEngine {
     @Published var usageErrors: [UUID: String] = [:]
     @Published var loginInProgress = false
     let isDemo: Bool
-    private var engines: [SubscriptionProvider: any SubscriptionEngine] = [:]
-    private var engine: (any SubscriptionEngine)? { engines[provider] }
-    private struct ProviderState {
-        var accounts: [SavedAccount]
-        var activeID: UUID?
-        var current: CurrentLogin?
-        var usageErrors: [UUID: String]
-        var loadError: String?
-    }
-    private var providerStates: [SubscriptionProvider: ProviderState] = [:]
+    private let engine: (any SubscriptionEngine)?
     private var refreshTask: Task<Void, Never>?
+    private var stopping = false
     init(demo: Bool = false, empty: Bool = false, previewState: UIPreviewState? = nil,
-         provider: SubscriptionProvider? = nil) {
+         provider: SubscriptionProvider = .claude) {
         // Every preview entry point selects this branch before a live engine can exist.
         isDemo = demo || empty || previewState != nil
-        self.provider = provider ?? (isDemo ? .claude :
-            UserDefaults.standard.string(forKey: "selectedProvider").flatMap(SubscriptionProvider.init(rawValue:)) ?? .claude)
+        self.provider = provider
         if isDemo {
+            engine = nil
             configurePreview(previewState ?? (empty ? .empty : .accounts))
-        } else { createEngine(); isLoading = true }
-    }
-
-    var isCredentialFreePreview: Bool { isDemo && engines.isEmpty }
-
-    private func createEngine() {
-        guard !isDemo, engines[provider] == nil else { return }
-        switch provider {
-        case .claude: engines[provider] = AccountEngine()
-        case .chatGPT: engines[provider] = CodexAccountEngine()
-        }
-    }
-
-    func selectProvider(_ selected: SubscriptionProvider) async {
-        guard selected != provider, !isBusy, !isRefreshing, !isLoading, !loginInProgress else { return }
-        providerStates[provider] = ProviderState(accounts: accounts, activeID: activeID, current: current,
-                                                  usageErrors: usageErrors, loadError: loadError)
-        provider = selected
-        error = nil; notice = nil; switchingAccountID = nil
-        if let cached = providerStates[selected] {
-            accounts = cached.accounts; activeID = cached.activeID; current = cached.current
-            usageErrors = cached.usageErrors; loadError = cached.loadError
         } else {
-            accounts = []; activeID = nil; current = nil; usageErrors = [:]; loadError = nil
-            if isDemo { configurePreview(.accounts) }
+            switch provider {
+            case .claude: engine = AccountEngine()
+            case .chatGPT: engine = CodexAccountEngine()
+            }
+            isLoading = true
         }
-        guard !isDemo else { return }
-        UserDefaults.standard.set(selected.rawValue, forKey: "selectedProvider")
-        createEngine()
-        await refresh()
     }
+
+    var isCredentialFreePreview: Bool { isDemo && engine == nil }
 
     private func configurePreview(_ state: UIPreviewState) {
         let now = Date()
@@ -139,20 +111,34 @@ actor AccountEngine: SubscriptionEngine {
                                      sevenDay: UsageWindow(utilization: 28, resetsAt: now.addingTimeInterval(410400)),
                                      modelScoped: [NamedUsageWindow(name: "Fable 5", window: UsageWindow(utilization: 18, resetsAt: now.addingTimeInterval(324000)))]))
         ]
+        accounts[0].renewalAt = now.addingTimeInterval(9 * 86_400 + 7_200)
+        accounts[1].renewalAt = now.addingTimeInterval(24 * 86_400 + 18_000)
         if provider == .chatGPT {
             accounts[0].plan = "Pro"
-            accounts[1].plan = "Plus"
+            accounts[1].plan = "Prolite"
             for index in accounts.indices {
                 accounts[index].accountUUID = "codex-demo-\(index)"
                 accounts[index].organizationUUID = ""
+                accounts[index].usage?.fiveHour = nil
                 accounts[index].usage?.modelScoped = []
             }
+            accounts[0].usage?.manualResets = ManualResetSummary(availableCount: 3, credits: [
+                ManualResetCredit(id: "sample-reset-one", resetType: "codexRateLimits", status: "available",
+                    grantedAt: now.addingTimeInterval(-5 * 86_400), expiresAt: now.addingTimeInterval(3 * 86_400 + 7_200), title: "Earned reset"),
+                ManualResetCredit(id: "sample-reset-two", resetType: "codexRateLimits", status: "available",
+                    grantedAt: now.addingTimeInterval(-2 * 86_400), expiresAt: now.addingTimeInterval(14 * 86_400 + 3_600), title: "Earned reset"),
+                ManualResetCredit(id: "sample-reset-three", resetType: "codexRateLimits", status: "available",
+                    grantedAt: now.addingTimeInterval(-86_400), expiresAt: now.addingTimeInterval(27 * 86_400 + 10_800), title: "Earned reset")
+            ])
+            accounts[1].usage?.manualResets = ManualResetSummary(availableCount: 0, credits: [])
         }
         activeID = accounts[0].id
         current = previewLogin(for: accounts[0])
         switch state {
         case .accounts:
             break
+        case .missingFiveHour:
+            for index in accounts.indices { accounts[index].usage?.fiveHour = nil }
         case .empty, .loading, .unavailable:
             accounts = []; activeID = nil; current = nil
             isLoading = state == .loading
@@ -171,9 +157,10 @@ actor AccountEngine: SubscriptionEngine {
             switchingAccountID = accounts[1].id
         case .exhausted:
             accounts[0].usage = UsageSnapshot(
-                fiveHour: UsageWindow(utilization: 100, resetsAt: now.addingTimeInterval(2640)),
+                fiveHour: provider == .claude ? UsageWindow(utilization: 100, resetsAt: now.addingTimeInterval(2640)) : nil,
                 sevenDay: UsageWindow(utilization: 100, resetsAt: now.addingTimeInterval(239400)),
-                modelScoped: provider == .claude ? [NamedUsageWindow(name: "Fable 5", window: UsageWindow(utilization: 100, resetsAt: now.addingTimeInterval(181200)))] : [])
+                modelScoped: provider == .claude ? [NamedUsageWindow(name: "Fable 5", window: UsageWindow(utilization: 100, resetsAt: now.addingTimeInterval(181200)))] : [],
+                manualResets: accounts[0].usage?.manualResets)
         case .longLabel:
             accounts[0].label = "Personal account for research and independent projects with a very long name"
             accounts[0].email = "alexandra.research.and.development@a-long-personal-domain.example"
@@ -188,7 +175,7 @@ actor AccountEngine: SubscriptionEngine {
                      organizationUUID: account.organizationUUID, plan: account.plan)
     }
     func load() async {
-        guard let engine else { return }
+        guard !stopping, let engine else { return }
         isLoading = true
         defer { isLoading = false }
         // Display metadata can load even when the selected CLI login is unavailable.
@@ -198,6 +185,7 @@ actor AccountEngine: SubscriptionEngine {
             loadError = "Couldn’t load saved accounts. \(error.localizedDescription)"
             return
         }
+        guard !stopping else { return }
         do {
             apply(try await engine.state())
             loadError = nil
@@ -209,32 +197,38 @@ actor AccountEngine: SubscriptionEngine {
     private func apply(_ state: SwitchboardState) {
         accounts = state.accounts; activeID = state.activeID; current = state.current
     }
-    private func perform(_ operation: () async throws -> Void) async {
+    private func perform(checkLogin: Bool = true, _ operation: () async throws -> Void) async {
+        guard !stopping else { return }
         guard !isBusy, !isRefreshing, !isLoading else {
             error = "Wait for the current operation to finish, then try again."
             return
         }
         isBusy = true; error = nil; notice = nil
         defer { isBusy = false }
-        do { try await operation(); await load() }
+        do {
+            try await operation()
+            if checkLogin { await load() }
+            else if let engine { accounts = try await engine.savedAccounts() }
+        }
         catch { self.error = error.localizedDescription }
     }
     func refresh() async {
-        guard !isRefreshing, !isBusy, !loginInProgress else { return }
+        guard !stopping, !isRefreshing, !isBusy, !loginInProgress else { return }
         error = nil
         guard let engine else { notice = "Preview data only. Your logins are unchanged."; return }
         isRefreshing = true
         defer { isRefreshing = false }
         await load()
+        guard !stopping, !Task.isCancelled else { return }
         let task = Task { [weak self] in
             guard let self else { return }
             for account in accounts {
-                if Task.isCancelled { break }
+                if stopping || Task.isCancelled { break }
                 do { try await engine.usage(account.id); usageErrors[account.id] = nil }
                 catch is CancellationError { break }
                 catch { usageErrors[account.id] = error.localizedDescription }
             }
-            await load()
+            if !Task.isCancelled { await load() }
         }
         refreshTask = task
         await task.value
@@ -260,9 +254,18 @@ actor AccountEngine: SubscriptionEngine {
         }
     }
     func rename(_ account: SavedAccount, label: String) async {
-        await perform {
+        await perform(checkLogin: false) {
             if let engine { try await engine.rename(account.id, label: label) }
             else if let index = accounts.firstIndex(where: { $0.id == account.id }) { accounts[index].label = label }
+        }
+    }
+    func setRenewal(account: SavedAccount, date: Date?) async {
+        // A billing reminder changes display metadata only; do not query CLI credentials.
+        await perform(checkLogin: false) {
+            if let engine { try await engine.setRenewal(account.id, date: date) }
+            else if let index = accounts.firstIndex(where: { $0.id == account.id }) {
+                accounts[index].renewalAt = date
+            }
         }
     }
     func remove(_ account: SavedAccount) async {
@@ -297,8 +300,9 @@ actor AccountEngine: SubscriptionEngine {
         await perform { try await engine?.cancelLogin(); loginInProgress = false }
     }
     func shutdown() async {
+        stopping = true
         refreshTask?.cancel()
         await refreshTask?.value
-        for engine in engines.values { await engine.shutdown() }
+        await engine?.shutdown()
     }
 }

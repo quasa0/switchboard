@@ -7,6 +7,7 @@ protocol SubscriptionEngine: Actor {
     func saveCurrent(label: String) async throws
     func activate(_ id: UUID) async throws
     func rename(_ id: UUID, label: String) async throws
+    func setRenewal(_ id: UUID, date: Date?) async throws
     func remove(_ id: UUID) async throws
     func usage(_ id: UUID) async throws
     func beginLogin() async throws

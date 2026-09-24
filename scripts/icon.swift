@@ -30,18 +30,15 @@ func drawIcon(size: Int) -> Data {
     shadow.shadowBlurRadius = 32
     shadow.shadowOffset = NSSize(width: 0, height: -17)
     shadow.set()
-    NSColor(srgbRed: 0.77, green: 0.40, blue: 0.30, alpha: 1).setFill()
+    NSColor(white: 0.08, alpha: 1).setFill()
     tile.fill()
     NSGraphicsContext.restoreGraphicsState()
 
-    NSGradient(starting: NSColor(srgbRed: 0.76, green: 0.38, blue: 0.28, alpha: 1),
-               ending: NSColor(srgbRed: 0.86, green: 0.54, blue: 0.41, alpha: 1))!
-        .draw(in: tile, angle: 90)
     NSColor.white.withAlphaComponent(0.16).setStroke()
     tile.lineWidth = 2
     tile.stroke()
 
-    NSColor(srgbRed: 1, green: 0.97, blue: 0.92, alpha: 1).setStroke()
+    NSColor(white: 0.96, alpha: 1).setStroke()
     let arrows = NSBezierPath()
     arrows.lineWidth = 43
     arrows.lineCapStyle = .round

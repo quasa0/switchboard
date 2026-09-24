@@ -45,7 +45,7 @@ public struct CodexUsageClient: Sendable {
             let id = nonempty(single.limitId) ?? "codex"
             if buckets[id] == nil { buckets[id] = single }
         }
-        var snapshot = UsageSnapshot(fetchedAt: fetchedAt)
+        var snapshot = UsageSnapshot(fetchedAt: fetchedAt, manualResets: try result.rateLimitResetCredits?.summary())
         let keys = buckets.keys.sorted { lhs, rhs in
             if lhs == "codex" { return rhs != "codex" }
             if rhs == "codex" { return false }
@@ -69,7 +69,7 @@ public struct CodexUsageClient: Sendable {
                 }
             }
         }
-        guard snapshot.fiveHour != nil || snapshot.sevenDay != nil || !snapshot.modelScoped.isEmpty else {
+        guard snapshot.fiveHour != nil || snapshot.sevenDay != nil || !snapshot.modelScoped.isEmpty || snapshot.manualResets != nil else {
             throw SwitchboardError.message("Codex recognized this subscription but did not return usage windows. Refresh again.")
         }
         return snapshot
@@ -92,6 +92,35 @@ private struct CodexUsageReply: Decodable {
     struct Payload: Decodable {
         var rateLimits: Bucket?
         var rateLimitsByLimitId: [String: Bucket]?
+        var rateLimitResetCredits: ResetCredits?
+    }
+    struct ResetCredits: Decodable {
+        var availableCount: Int
+        var credits: [ResetCredit]?
+        func summary() throws -> ManualResetSummary {
+            guard availableCount >= 0 else {
+                throw SwitchboardError.message("Codex returned an invalid manual reset count. Refresh again.")
+            }
+            return ManualResetSummary(availableCount: availableCount, credits: try credits?.map { try $0.credit() })
+        }
+    }
+    struct ResetCredit: Decodable {
+        var id: String
+        var resetType: String
+        var status: String
+        var grantedAt: Int64
+        var expiresAt: Int64?
+        var title: String?
+        var description: String?
+        func credit() throws -> ManualResetCredit {
+            guard !id.isEmpty, grantedAt >= 0, expiresAt.map({ $0 >= 0 }) ?? true else {
+                throw SwitchboardError.message("Codex returned invalid manual reset details. Refresh again.")
+            }
+            return ManualResetCredit(id: id, resetType: resetType, status: status,
+                grantedAt: Date(timeIntervalSince1970: Double(grantedAt)),
+                expiresAt: expiresAt.map { Date(timeIntervalSince1970: Double($0)) },
+                title: title, detail: description)
+        }
     }
     struct Bucket: Decodable {
         var limitId: String?
@@ -273,7 +302,7 @@ private final class CodexUsageProcess: @unchecked Sendable {
                             throw SwitchboardError.message("This login has no ChatGPT subscription usage. Sign in to Codex with ChatGPT.")
                         }
                         expectedID = usageID
-                        try send(method: "account/rateLimits/read", id: usageID, params: ["excludeResetCreditDetails": true],
+                        try send(method: "account/rateLimits/read", id: usageID, params: ["excludeResetCreditDetails": false],
                                  to: input.fileHandleForWriting)
                     } else {
                         return try CodexUsageClient.parseUsageResponse(line)

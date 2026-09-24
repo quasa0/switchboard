@@ -3,6 +3,50 @@ import XCTest
 @testable import SwitchboardCore
 
 final class AccountRepositoryTests: RepositoryTestCase {
+    func testManualRenewalIsScopedToAccountPersistsAndNeverChangesLiveLogin() throws {
+        let first = try snapshot(), second = try snapshot("b")
+        try seedLive(first, config: ["theme": "dark"])
+        let a = try repository.capture(first, label: "Personal"), b = try repository.capture(second, label: "Work")
+        let originalConfig = try Data(contentsOf: installation.configFile)
+        let originalLive = secrets.value(installation: installation)
+        let originalSecrets = secrets.values, originalWrites = secrets.writes, originalDeletes = secrets.deletes
+        let renewal = Date(timeIntervalSince1970: 1_817_265_723.5)
+        try repository.withLock { try repository.setRenewal(a.id, date: renewal) }
+        var expected = a
+        expected.renewalAt = renewal
+        XCTAssertEqual(try repository.accounts(), [expected, b])
+        XCTAssertEqual(secrets.values, originalSecrets)
+        XCTAssertEqual(secrets.writes, originalWrites)
+        XCTAssertEqual(secrets.deletes, originalDeletes)
+
+        let reopened = AccountRepository(directory: repository.directory, secrets: secrets, installation: installation)
+        XCTAssertEqual(try reopened.accounts(), [expected, b])
+        let recaptured = try reopened.capture(snapshot(token: "synthetic-renewal-rotated"))
+        XCTAssertEqual(recaptured, expected)
+        let postCaptureSecrets = secrets.values, postCaptureWrites = secrets.writes
+        try reopened.withLock { try reopened.setRenewal(a.id, date: nil) }
+        XCTAssertEqual(try reopened.accounts(), [a, b])
+        XCTAssertEqual(secrets.values, postCaptureSecrets)
+        XCTAssertEqual(secrets.writes, postCaptureWrites)
+        XCTAssertEqual(secrets.deletes, originalDeletes)
+        XCTAssertEqual(secrets.value(installation: installation), originalLive)
+        XCTAssertEqual(try Data(contentsOf: installation.configFile), originalConfig)
+    }
+
+    func testManualRenewalForMissingAccountFailsWithoutChangingMetadataOrLogin() throws {
+        let first = try snapshot()
+        try seedLive(first)
+        try repository.capture(first)
+        let metadataFile = repository.directory.appendingPathComponent("accounts.json")
+        let metadata = try Data(contentsOf: metadataFile), config = try Data(contentsOf: installation.configFile)
+        let originalSecrets = secrets.values, originalWrites = secrets.writes
+        XCTAssertThrowsError(try repository.withLock { try repository.setRenewal(UUID(), date: Date()) })
+        XCTAssertEqual(try Data(contentsOf: metadataFile), metadata)
+        XCTAssertEqual(try Data(contentsOf: installation.configFile), config)
+        XCTAssertEqual(secrets.values, originalSecrets)
+        XCTAssertEqual(secrets.writes, originalWrites)
+    }
+
     func testSwitchRoundTripSavesRotatedTokenAndPreservesUnrelatedSettingsAndCredentials() throws {
         let first = try snapshot("a")
         let second = try snapshot("b")

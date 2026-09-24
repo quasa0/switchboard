@@ -20,6 +20,7 @@ actor CodexAccountEngine: SubscriptionEngine {
         try repository.withLock { try repository.activate(id) }
     }
     func rename(_ id: UUID, label: String) throws { try repository.withLock { try repository.rename(id, label: label) } }
+    func setRenewal(_ id: UUID, date: Date?) throws { try repository.withLock { try repository.setRenewal(id, date: date) } }
     func remove(_ id: UUID) throws { try repository.withLock { try repository.remove(id) } }
 
     func usage(_ id: UUID) async throws {

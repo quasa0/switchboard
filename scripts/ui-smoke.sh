@@ -60,15 +60,18 @@ if report.get("credentialAccess") is not False or report.get("quitCleanupPassed"
 expected = {
     "accounts-light.png", "accounts-dark.png", "empty.png", "loading.png",
     "error.png", "unavailable.png", "exhausted.png", "switching.png", "long-label.png", "minimum-width.png",
+    "missing-five-hour.png", "five-hour-restored.png", "one-provider-error.png", "only-claude.png", "only-chatgpt.png",
+    "manual-reset-states.png",
 }
-expected |= {"chatgpt-" + name for name in list(expected)}
 if {entry["file"] for entry in report["renders"]} != expected:
     raise SystemExit("UI smoke did not render every required state.")
+if any(entry.get("provider") != "all" for entry in report["renders"]):
+    raise SystemExit("UI smoke rendered a provider-specific screen instead of the unified dashboard.")
 for name in sorted(expected):
     image = output / name
     if not image.is_file() or image.stat().st_size <= 1000:
         raise SystemExit(f"Missing or empty preview: {name}")
 if process.poll() is None:
     raise SystemExit("UI smoke left its app process running.")
-print(f"PASS: twenty synthetic UI previews; independent provider actions; clean quit. Review {output}")
+print(f"PASS: {len(expected)} unified dashboard previews; independent provider actions; clean quit. Review {output}")
 PY

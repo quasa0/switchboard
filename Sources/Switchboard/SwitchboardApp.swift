@@ -3,19 +3,19 @@ import AppKit
 
 @main struct SwitchboardApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
-    @StateObject private var model: AppModel
+    @StateObject private var model: DashboardModel
     private let launchOptions: UILaunchOptions
     init() {
         let options = UILaunchOptions(arguments: ProcessInfo.processInfo.arguments)
         launchOptions = options
-        _model = StateObject(wrappedValue: AppModel(demo: options.requiresDemo,
+        _model = StateObject(wrappedValue: DashboardModel(demo: options.requiresDemo,
                                                   previewState: options.requiresDemo ? options.previewState : nil,
-                                                  provider: options.requiresDemo ? options.previewProvider : nil))
+                                                  previewProvider: options.requiresDemo ? options.previewProvider : nil))
     }
     var body: some Scene {
-        Window("Switchboard", id: "main") {
+        Window("Switchboard", id: "dashboard") {
             AccountListView(model: model)
-                .preferredColorScheme(launchOptions.isDark ? .dark : nil)
+                .preferredColorScheme(launchOptions.requiresDemo ? (launchOptions.isDark ? .dark : .light) : .dark)
                 .task {
                     delegate.model = model
                     if let error = launchOptions.validationError {
@@ -30,7 +30,7 @@ import AppKit
                             delegate.uiSmokeQuitCheck = {
                                 do {
                                     try report.writeAfterQuitCleanup(to: launchOptions.smokeOutput)
-                                    print("PASS: independent provider UI actions, twenty native preview states, and quit cleanup. No account engine or credential access.")
+                                    print("PASS: unified dashboard actions, native preview states, and quit cleanup. No account engine or credential access.")
                                     print("Artifacts: \(launchOptions.smokeOutput.path)")
                                 } catch {
                                     fputs("FAIL: could not write UI smoke report.\n", stderr)
@@ -59,11 +59,11 @@ import AppKit
                     } else if launchOptions.runsCredentialSmoke {
                         do {
                             try await Task.detached { try SmokeCheck.keychainRoundTrip() }.value
-                            let second = model.accounts[1]
-                            await model.switchAccount(second)
-                            guard model.activeID == second.id else { throw CocoaError(.validationMissingMandatoryProperty) }
-                            await model.rename(second, label: "Renamed")
-                            guard model.accounts[1].label == "Renamed" else { throw CocoaError(.validationMissingMandatoryProperty) }
+                            let second = model.claude.accounts[1]
+                            await model.claude.switchAccount(second)
+                            guard model.claude.activeID == second.id else { throw CocoaError(.validationMissingMandatoryProperty) }
+                            await model.claude.rename(second, label: "Renamed")
+                            guard model.claude.accounts[1].label == "Renamed" else { throw CocoaError(.validationMissingMandatoryProperty) }
                             print("PASS: native app loaded; real Keychain and isolated configs switched A → B → A → B; rotated credentials survived; UI actions passed; test secrets removed.")
                             exit(0)
                         } catch {
@@ -87,7 +87,7 @@ import AppKit
 }
 
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
-    weak var model: AppModel?
+    weak var model: DashboardModel?
     var didStartAutomation = false
     var uiSmokeQuitCheck: (() -> Void)?
     private var stopping = false

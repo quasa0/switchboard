@@ -15,9 +15,9 @@ class CodexTestCase: XCTestCase {
         repository = CodexAccountRepository(directory: root.appendingPathComponent("saved"), secrets: secrets, installation: installation)
     }
     override func tearDownWithError() throws { try FileManager.default.removeItem(at: root) }
-    func snapshot(_ user: String = "a", workspace: String? = nil, token: String = "original", refreshed: String = "2026-09-24T09:00:00Z") throws -> CodexCredentialSnapshot {
+    func snapshot(_ user: String = "a", workspace: String? = nil, token: String = "original", refreshed: String = "2026-09-24T09:00:00Z", plan: String = "pro") throws -> CodexCredentialSnapshot {
         let claims: [String: Any] = ["email": "\(user)@example.test", "sub": "user-\(user)",
-            "https://api.openai.com/auth": ["chatgpt_user_id": "user-\(user)", "chatgpt_account_id": workspace ?? "workspace-\(user)", "chatgpt_plan_type": "pro"]]
+            "https://api.openai.com/auth": ["chatgpt_user_id": "user-\(user)", "chatgpt_account_id": workspace ?? "workspace-\(user)", "chatgpt_plan_type": plan]]
         let payload = try JSONSerialization.data(withJSONObject: claims).base64EncodedString()
             .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
         let object: [String: Any] = ["auth_mode": "chatgpt", "OPENAI_API_KEY": NSNull(), "last_refresh": refreshed,
@@ -36,10 +36,19 @@ final class CodexStorageTests: CodexTestCase {
         let originalConfig = try Data(contentsOf: installation.configFile)
         try repository.live.apply(second, ifUnchangedFrom: first)
         XCTAssertEqual(try repository.live.snapshot(), second)
-        XCTAssertEqual(try second.validated(), CurrentLogin(email: "b@example.test", accountUUID: "user-b", organizationUUID: "workspace-b", plan: "Pro"))
+        XCTAssertEqual(try second.validated(), CurrentLogin(email: "b@example.test", accountUUID: "user-b", organizationUUID: "workspace-b", plan: "Pro · 20×"))
         XCTAssertEqual(try Data(contentsOf: installation.configFile), originalConfig)
         let attributes = try FileManager.default.attributesOfItem(atPath: installation.authFile.path)
         XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o600)
+    }
+    func testTokenPlanIdentityUsesProviderTiersWithoutChangingAuthPayload() throws {
+        for (rawPlan, expected) in [("prolite", "Pro · 5×"), ("pro", "Pro · 20×"), ("plus", "Plus · 1×"),
+                                    ("future_custom", "Future Custom"), ("business", "Business")] {
+            let credential = try snapshot(plan: rawPlan)
+            let original = credential.authJSON
+            XCTAssertEqual(try credential.validated().plan, expected)
+            XCTAssertEqual(credential.authJSON, original)
+        }
     }
     func testRejectsChangedLiveCredentialBeforeAtomicReplacement() throws {
         let first = try snapshot(), rotated = try snapshot(token: "rotated")

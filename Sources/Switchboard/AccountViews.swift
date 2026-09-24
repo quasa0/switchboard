@@ -3,19 +3,20 @@ import SwiftUI
 import SwitchboardCore
 
 private enum Palette {
-    static let canvas = adaptive(light: 0xF6F4F0, dark: 0x191918)
-    static let paper = adaptive(light: 0xFFFEFB, dark: 0x222220)
-    static let ink = adaptive(light: 0x33332E, dark: 0xECEAE4)
-    static let muted = adaptive(light: 0x706C65, dark: 0xADA79D)
-    static let faint = adaptive(light: 0xE3E0D9, dark: 0x393834)
-    static let coral = adaptive(light: 0xC2644A, dark: 0xDE987D)
-    static let coralWash = adaptive(light: 0xF5E6D9, dark: 0x3A2D27)
-    static let green = adaptive(light: 0x4A7057, dark: 0x9ABB9C)
-    static let greenWash = adaptive(light: 0xE6F0E0, dark: 0x2D3A2D)
-    static let accentText = adaptive(light: 0xA34B34, dark: 0xEBA68A)
+    static let canvas = adaptive(light: 0xFAFAF9, dark: 0x141413)
+    static let paper = adaptive(light: 0xFFFFFF, dark: 0x1E1E1C)
+    static let ink = adaptive(light: 0x242423, dark: 0xE8E8E5)
+    static let muted = adaptive(light: 0x70706B, dark: 0xA1A19B)
+    static let faint = adaptive(light: 0xE7E7E3, dark: 0x2C2C29)
+    static let accent = adaptive(light: 0x0B8866, dark: 0x10B981)
+    static let accentWash = adaptive(light: 0xEDF7F2, dark: 0x16281F)
+    static let green = adaptive(light: 0x15835F, dark: 0x6BCBA9)
+    static let greenWash = adaptive(light: 0xE7F4EE, dark: 0x193126)
+    static let accentText = adaptive(light: 0x0B7557, dark: 0x74D5B3)
     static let warning = adaptive(light: 0x90601B, dark: 0xE4BA75)
     static let danger = adaptive(light: 0xB13B32, dark: 0xF2A39B)
-    static let meter = adaptive(light: 0x807A70, dark: 0xB7B0A4)
+    static let errorWash = adaptive(light: 0xFBEFEC, dark: 0x321C1A)
+    static let meter = adaptive(light: 0x0B9970, dark: 0x10B981)
     static let edge = Color(nsColor: NSColor(name: nil) { appearance in
         appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
             ? NSColor.white.withAlphaComponent(0.09) : NSColor.black.withAlphaComponent(0.07)
@@ -31,94 +32,97 @@ private enum Palette {
     }
 }
 
+private struct AccountActionTarget: Identifiable {
+    let provider: SubscriptionProvider
+    let account: SavedAccount
+    var id: String { "\(provider.rawValue)-\(account.id.uuidString)" }
+}
+
 struct AccountListView: View {
-    @ObservedObject var model: AppModel
-    @State private var showingAddAccount = false
-    @State private var accountToRename: SavedAccount?
-    @State private var accountToRemove: SavedAccount?
+    @ObservedObject var model: DashboardModel
+    @State private var accountToAdd: SubscriptionProvider?
+    @State private var accountToRename: AccountActionTarget?
+    @State private var accountToRenew: AccountActionTarget?
+    @State private var accountToViewResets: AccountActionTarget?
+    @State private var accountToRemove: AccountActionTarget?
+
+    private var isPresentingAccountAction: Bool {
+        accountToAdd != nil || accountToRename != nil || accountToRenew != nil
+            || accountToViewResets != nil || accountToRemove != nil
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             header
-            providerNavigation
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    if let loadError = model.loadError {
-                        MessageStrip(symbol: "exclamationmark.circle", text: loadError, isError: true)
-                    }
-                    if let error = model.error {
-                        MessageStrip(symbol: "exclamationmark.circle", text: error, isError: true)
-                    } else if model.loadError == nil, let notice = model.notice {
-                        MessageStrip(symbol: "checkmark.circle", text: notice, isError: false)
-                    }
-
-                    if model.accounts.isEmpty {
-                        if model.isLoading {
-                            ProgressView("Loading accounts…")
-                                .frame(maxWidth: .infinity, minHeight: 280)
-                        } else if model.loadError != nil {
-                            unavailableState
-                        } else {
-                            emptyState
-                        }
-                    } else {
-                        accountSectionHeader
-                        ForEach(model.accounts) { account in
-                            AccountCard(
-                                account: account,
-                                provider: model.provider,
-                                isActive: account.id == model.activeID,
-                                isBusy: model.isBusy || model.isRefreshing || model.isLoading || model.loginInProgress,
-                                isSwitching: account.id == model.switchingAccountID,
-                                usageError: model.usageErrors[account.id],
-                                onSwitch: { Task { await model.switchAccount(account) } },
-                                onRename: { accountToRename = account },
-                                onRemove: { accountToRemove = account }
+            GeometryReader { geometry in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 22) {
+                        ForEach(model.providers, id: \.provider) { providerModel in
+                            ProviderAccountSection(
+                                model: providerModel,
+                                wideLayout: geometry.size.width >= 950,
+                                isBlocked: model.isBlocked || isPresentingAccountAction,
+                                onAdd: { accountToAdd = providerModel.provider },
+                                onRename: { accountToRename = AccountActionTarget(provider: providerModel.provider, account: $0) },
+                                onSetRenewal: { accountToRenew = AccountActionTarget(provider: providerModel.provider, account: $0) },
+                                onViewResets: { accountToViewResets = AccountActionTarget(provider: providerModel.provider, account: $0) },
+                                onRemove: { accountToRemove = AccountActionTarget(provider: providerModel.provider, account: $0) }
                             )
                         }
-                        if let current = model.current, model.activeID == nil, !model.loginInProgress {
-                            unsavedLogin(current)
-                        }
                     }
+                    .padding(.horizontal, 24)
+                    .padding(.top, 8)
+                    .padding(.bottom, 24)
                 }
-                .padding(.horizontal, 28)
-                .padding(.top, 8)
-                .padding(.bottom, 24)
             }
             footer
         }
-        .frame(minWidth: 620, idealWidth: 720, minHeight: 490, idealHeight: 740)
+        .frame(minWidth: 620, idealWidth: 1120, minHeight: 490, idealHeight: 780)
         .background(Palette.canvas)
         .foregroundStyle(Palette.ink)
-        .sheet(isPresented: $showingAddAccount) { AddAccountSheet(model: model) }
-        .sheet(item: $accountToRename) { account in RenameAccountSheet(model: model, account: account) }
+        .sheet(item: $accountToAdd) { provider in
+            AddAccountSheet(model: model.model(for: provider))
+        }
+        .sheet(item: $accountToRename) { target in
+            RenameAccountSheet(model: model.model(for: target.provider), account: target.account)
+        }
+        .sheet(item: $accountToRenew) { target in
+            RenewalDateSheet(model: model.model(for: target.provider), account: target.account)
+        }
+        .sheet(item: $accountToViewResets) { target in
+            ResetDetailsSheet(account: target.account, provider: target.provider)
+        }
         .alert("Remove saved account?", isPresented: Binding(
             get: { accountToRemove != nil },
             set: { if !$0 { accountToRemove = nil } }
-        ), presenting: accountToRemove) { account in
+        ), presenting: accountToRemove) { target in
             Button("Cancel", role: .cancel) { accountToRemove = nil }
             Button("Remove", role: .destructive) {
                 accountToRemove = nil
-                Task { await model.remove(account) }
+                Task { await model.model(for: target.provider).remove(target.account) }
             }
-        } message: { account in
-            Text("Remove \(account.label) from Switchboard? This deletes its saved login. It does not cancel the subscription or sign \(model.provider.cliName) out.")
-        }
-        .onChange(of: model.provider) { _, _ in
-            showingAddAccount = false
-            accountToRename = nil
-            accountToRemove = nil
+        } message: { target in
+            Text("Remove \(target.account.label) from Switchboard? This deletes its saved login. It does not cancel the subscription or sign \(target.provider.cliName) out.")
         }
     }
 
     private var header: some View {
         HStack(alignment: .center, spacing: 14) {
-            SwitchboardMark(size: 36)
+            Image(systemName: "arrow.left.arrow.right")
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(Palette.muted)
+                .frame(width: 25)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
-                Text("Switchboard")
-                    .font(.system(size: 22, weight: .semibold))
-                    .tracking(-0.5)
-                Text(model.isDemo ? "Preview · Sample accounts" : "Your subscriptions, ready to switch.")
+                HStack(alignment: .firstTextBaseline, spacing: 11) {
+                    Text("Switchboard")
+                        .font(.system(size: 20, weight: .semibold))
+                        .tracking(-0.5)
+                    Text("\(model.accountCount) accounts")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.muted)
+                }
+                Text(model.isDemo ? "Preview · Sample accounts" : "All your accounts, at a glance.")
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.muted)
             }
@@ -131,148 +135,31 @@ struct AccountListView: View {
                         if model.isRefreshing { ProgressView().controlSize(.mini) }
                     }
                     .frame(width: 14, height: 14)
-                    Text("Refresh")
+                    Text("Refresh all")
                 }
             }
             .buttonStyle(ActionButtonStyle(prominent: false, staticFeedback: true))
-            .help("Refresh accounts and usage (⌘R)")
-            .accessibilityLabel("Refresh accounts and usage")
+            .help("Refresh all accounts and usage (⌘R)")
+            .accessibilityLabel("Refresh all accounts and usage")
             .keyboardShortcut("r", modifiers: .command)
-            .disabled(model.isBusy || model.isRefreshing || model.isLoading || model.loginInProgress)
+            .disabled(model.isBlocked || isPresentingAccountAction)
 
-            Button { showingAddAccount = true } label: {
+            Menu {
+                Button("Add Claude account") { accountToAdd = .claude }
+                Button("Add ChatGPT account") { accountToAdd = .chatGPT }
+            } label: {
                 Label("Add account", systemImage: "plus")
             }
-            .buttonStyle(ActionButtonStyle(prominent: true))
-            .keyboardShortcut("n", modifiers: .command)
-            .disabled(model.isBusy || model.isRefreshing || model.isLoading)
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .buttonStyle(ActionButtonStyle(prominent: false))
+            .fixedSize()
+            .disabled(model.isBlocked || isPresentingAccountAction)
+            .accessibilityLabel("Add account")
         }
-        .padding(.horizontal, 28)
-        .padding(.top, 22)
-        .padding(.bottom, 20)
-    }
-
-    private var providerNavigation: some View {
-        HStack(alignment: .center, spacing: 20) {
-            Picker("Subscription provider", selection: Binding(
-                get: { model.provider },
-                set: { provider in Task { await model.selectProvider(provider) } }
-            )) {
-                Text("Claude").tag(SubscriptionProvider.claude)
-                Text("ChatGPT").tag(SubscriptionProvider.chatGPT)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .controlSize(.large)
-            .frame(width: 210)
-            .disabled(model.isBusy || model.isRefreshing || model.isLoading || model.loginInProgress
-                      || showingAddAccount || accountToRename != nil || accountToRemove != nil)
-            .accessibilityLabel("Subscription provider")
-            .help("Choose which subscription’s accounts to manage. Each provider keeps its own active account.")
-
-            Text(model.provider == .chatGPT
-                 ? "ChatGPT subscriptions used in Codex.\nChatGPT message quotas are separate."
-                 : "Claude subscriptions used in Claude Code.")
-                .font(.system(size: 11))
-                .foregroundStyle(Palette.muted)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.horizontal, 28)
-        .padding(.bottom, 18)
-    }
-
-    private var accountSectionHeader: some View {
-        HStack {
-            HStack(spacing: 7) {
-                Text("ACCOUNTS").tracking(1.1)
-                Text("\(model.accounts.count)")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Palette.faint.opacity(0.6), in: Capsule())
-            }
-            Spacer()
-            HStack(spacing: 5) {
-                Image(systemName: "terminal")
-                Text(model.provider.cliName)
-            }
-            .font(.system(size: 11, weight: .medium))
-        }
-        .font(.system(size: 10, weight: .semibold))
-        .foregroundStyle(Palette.muted)
-        .padding(.bottom, 1)
-    }
-
-    private var emptyState: some View {
-        VStack(spacing: 0) {
-            ZStack {
-                Circle().fill(Palette.coralWash.opacity(0.55)).frame(width: 100, height: 100)
-                Image(systemName: "person.crop.rectangle.stack")
-                    .font(.system(size: 38, weight: .light))
-                    .foregroundStyle(Palette.coral)
-            }
-            .padding(.bottom, 23)
-            Text("Your \(model.provider.displayName) accounts, together.")
-                .font(.system(size: 22, weight: .medium))
-                .tracking(-0.5)
-            Text("Save your \(model.provider.cliName) login. Add another account.\nSee your limits and switch with a click.")
-                .font(.system(size: 13))
-                .foregroundStyle(Palette.muted)
-                .lineSpacing(5)
-                .multilineTextAlignment(.center)
-                .padding(.top, 11)
-                .padding(.bottom, 25)
-            Button { showingAddAccount = true } label: {
-                Label("Add your first account", systemImage: "plus")
-            }
-            .buttonStyle(ActionButtonStyle(prominent: true))
-            .disabled(model.isBusy || model.isRefreshing)
-            if let current = model.current {
-                Text("Signed in as \(current.email)")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Palette.muted)
-                    .padding(.top, 16)
-                    .textSelection(.enabled)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 42)
-    }
-
-    private var unavailableState: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "exclamationmark.lock")
-                .font(.system(size: 34, weight: .light))
-                .foregroundStyle(Palette.coral)
-            Text("Accounts couldn’t be loaded")
-                .font(.system(size: 20, weight: .medium))
-            Text("Resolve the error above, then try again.")
-                .font(.system(size: 12))
-                .foregroundStyle(Palette.muted)
-            Button("Try again") { Task { await model.load() } }
-                .buttonStyle(ActionButtonStyle(prominent: true))
-                .disabled(model.isBusy || model.isRefreshing || model.isLoading)
-        }
-        .frame(maxWidth: .infinity, minHeight: 280)
-    }
-
-    private func unsavedLogin(_ current: CurrentLogin) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: "person.crop.circle.badge.plus")
-                .font(.system(size: 19))
-                .foregroundStyle(Palette.coral)
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Your current \(model.provider.cliName) login isn’t saved yet.").font(.system(size: 12, weight: .medium))
-                Text(current.email).font(.system(size: 11)).foregroundStyle(Palette.muted).lineLimit(1)
-            }
-            Spacer()
-            Button("Save login") { showingAddAccount = true }
-                .buttonStyle(ActionButtonStyle(prominent: false))
-                .disabled(model.isBusy || model.isRefreshing)
-        }
-        .padding(15)
-        .background(Palette.coralWash.opacity(0.4), in: RoundedRectangle(cornerRadius: 13))
+        .padding(.horizontal, 24)
+        .padding(.top, 16)
+        .padding(.bottom, 16)
     }
 
     private var footer: some View {
@@ -280,192 +167,415 @@ struct AccountListView: View {
             Rectangle().fill(Palette.faint).frame(height: 0.7)
             HStack(alignment: .center, spacing: 8) {
                 Image(systemName: "arrow.turn.down.right").font(.system(size: 11))
-                Text(model.provider.restartNotice)
+                Text("Close Codex before switching. Restart Claude Code after switching.")
                     .font(.system(size: 11))
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 10)
                 Image(systemName: "lock.shield").font(.system(size: 12))
                     .help("Saved logins stay in your Mac’s Keychain.")
                     .accessibilityLabel("Saved logins stay in your Mac’s Keychain")
             }
             .foregroundStyle(Palette.muted)
-            .padding(.horizontal, 28)
-            .padding(.vertical, 16)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 13)
         }
     }
 }
 
-private struct AccountCard: View {
+private struct ProviderAccountSection: View {
+    @ObservedObject var model: AppModel
+    let wideLayout: Bool
+    let isBlocked: Bool
+    let onAdd: () -> Void
+    let onRename: (SavedAccount) -> Void
+    let onSetRenewal: (SavedAccount) -> Void
+    let onViewResets: (SavedAccount) -> Void
+    let onRemove: (SavedAccount) -> Void
+
+    private var metricTitles: [String] {
+        let metrics = model.accounts.flatMap { accountUsageMetrics($0.usage, provider: model.provider) }
+        let ordered = metrics.filter(\.isFeatured)
+            + metrics.filter { $0.id == "five-hour" }
+            + metrics.filter { $0.id == "weekly" }
+            + metrics.filter { !$0.isFeatured && $0.id != "five-hour" && $0.id != "weekly" }
+        return ordered.reduce(into: []) { titles, metric in
+            if !titles.contains(metric.title) { titles.append(metric.title) }
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionHeader
+            if let loadError = model.loadError {
+                MessageStrip(symbol: "exclamationmark.circle", text: loadError, isError: true)
+            }
+            if let error = model.error {
+                MessageStrip(symbol: "exclamationmark.circle", text: error, isError: true)
+            } else if model.loadError == nil, let notice = model.notice {
+                MessageStrip(symbol: "checkmark.circle", text: notice, isError: false)
+            }
+
+            if model.accounts.isEmpty {
+                if model.isLoading {
+                    ProgressView("Loading \(model.provider.displayName) accounts…")
+                        .frame(maxWidth: .infinity, minHeight: 130)
+                } else if model.loadError != nil {
+                    unavailableState
+                } else {
+                    emptyState
+                }
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(model.accounts) { account in
+                        AccountRow(
+                            account: account,
+                            provider: model.provider,
+                            wideLayout: wideLayout,
+                            metricTitles: metricTitles,
+                            showsManualResets: model.provider == .chatGPT || model.accounts.contains { $0.usage?.manualResets != nil },
+                            isActive: account.id == model.activeID,
+                            isBusy: isBlocked,
+                            isSwitching: account.id == model.switchingAccountID,
+                            usageError: model.usageErrors[account.id],
+                            onSwitch: { Task { await model.switchAccount(account) } },
+                            onRename: { onRename(account) },
+                            onSetRenewal: { onSetRenewal(account) },
+                            onViewResets: { onViewResets(account) },
+                            onRemove: { onRemove(account) }
+                        )
+                    }
+                }
+                if let current = model.current, model.activeID == nil, !model.loginInProgress {
+                    unsavedLogin(current)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private var sectionHeader: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 8) {
+                Text(model.provider.displayName)
+                    .font(.system(size: 15, weight: .semibold))
+                Text("\(model.accounts.count)")
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(Palette.muted)
+                    .accessibilityLabel("\(model.accounts.count) saved accounts")
+                Spacer(minLength: 12)
+                Button(action: onAdd) {
+                    Label("Add account", systemImage: "plus")
+                }
+                .buttonStyle(ActionButtonStyle(prominent: false))
+                .disabled(isBlocked)
+                .accessibilityLabel("Add \(model.provider.displayName) account")
+            }
+            Text(model.provider == .chatGPT
+                 ? "Codex allowance remaining · ChatGPT chat quotas are separate."
+                 : "Claude Code · Allowance remaining")
+                .font(.system(size: 10))
+                .foregroundStyle(Palette.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var emptyState: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("No saved \(model.provider.displayName) accounts", systemImage: "person.crop.rectangle.stack")
+                .font(.system(size: 13, weight: .medium))
+            Text("Save a \(model.provider.cliName) login to see its limits and switch accounts.")
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.muted)
+                .fixedSize(horizontal: false, vertical: true)
+            if let current = model.current {
+                Text("Signed in as \(current.email)")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.muted)
+                    .textSelection(.enabled)
+            }
+            Button("Add \(model.provider.displayName) account", action: onAdd)
+                .buttonStyle(ActionButtonStyle(prominent: true))
+                .disabled(isBlocked)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .background(Palette.paper, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Palette.edge, lineWidth: 1))
+    }
+
+    private var unavailableState: some View {
+        HStack(spacing: 14) {
+            Text("Accounts couldn’t be loaded.")
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.muted)
+            Spacer(minLength: 8)
+            Button("Try again") { Task { await model.load() } }
+                .buttonStyle(ActionButtonStyle(prominent: false))
+                .disabled(isBlocked)
+        }
+        .padding(16)
+        .background(Palette.paper, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func unsavedLogin(_ current: CurrentLogin) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "person.crop.circle.badge.plus")
+                .font(.system(size: 18))
+                .foregroundStyle(Palette.accent)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Your current login isn’t saved.").font(.system(size: 12, weight: .medium))
+                Text(current.email).font(.system(size: 11)).foregroundStyle(Palette.muted).lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            Button("Save login", action: onAdd)
+                .buttonStyle(ActionButtonStyle(prominent: false))
+                .disabled(isBlocked)
+        }
+        .padding(14)
+        .background(Palette.accentWash.opacity(0.4), in: RoundedRectangle(cornerRadius: 13))
+    }
+}
+
+struct AccountUsageMetric: Identifiable {
+    let id: String
+    let title: String
+    let window: UsageWindow
+    var isFeatured = false
+}
+
+/// Only reported windows become meters. Missing fields do not mean zero usage or a failed request.
+func accountUsageMetrics(_ usage: UsageSnapshot?, provider: SubscriptionProvider) -> [AccountUsageMetric] {
+    guard let usage else { return [] }
+    var metrics: [AccountUsageMetric] = []
+    let featuredIndex = provider == .claude ? usage.modelScoped.firstIndex {
+        $0.name.range(of: "\\bfable\\b", options: [.regularExpression, .caseInsensitive]) != nil
+    } : nil
+    if let featuredIndex {
+        let scoped = usage.modelScoped[featuredIndex]
+        metrics.append(AccountUsageMetric(id: "model-\(featuredIndex)", title: "Weekly \(scoped.name)",
+                                          window: scoped.window, isFeatured: true))
+    }
+    if let window = usage.fiveHour {
+        metrics.append(AccountUsageMetric(id: "five-hour", title: "Five-hour limit", window: window))
+    }
+    if let window = usage.sevenDay {
+        metrics.append(AccountUsageMetric(id: "weekly", title: "Weekly limit", window: window))
+    }
+    for (index, scoped) in usage.modelScoped.enumerated() where index != featuredIndex {
+        metrics.append(AccountUsageMetric(id: "model-\(index)",
+                                          title: provider == .claude ? "Weekly \(scoped.name)" : scoped.name,
+                                          window: scoped.window))
+    }
+    if provider == .claude {
+        if let window = usage.sevenDaySonnet {
+            metrics.append(AccountUsageMetric(id: "sonnet", title: "Weekly Sonnet", window: window))
+        }
+        if let window = usage.sevenDayOpus {
+            metrics.append(AccountUsageMetric(id: "opus", title: "Weekly Opus", window: window))
+        }
+    }
+    return metrics
+}
+
+private struct AccountRow: View {
     let account: SavedAccount
     let provider: SubscriptionProvider
+    let wideLayout: Bool
+    let metricTitles: [String]
+    let showsManualResets: Bool
     let isActive: Bool
     let isBusy: Bool
     let isSwitching: Bool
     let usageError: String?
     let onSwitch: () -> Void
     let onRename: () -> Void
+    let onSetRenewal: () -> Void
+    let onViewResets: () -> Void
     let onRemove: () -> Void
     @State private var isHovered = false
     @FocusState private var isFocused: Bool
-    @Environment(\.colorScheme) private var colorScheme
 
     private var hasCustomName: Bool {
         account.label.caseInsensitiveCompare(account.email) != .orderedSame
     }
 
+    private var metrics: [AccountUsageMetric] {
+        accountUsageMetrics(account.usage, provider: provider)
+    }
+
     var body: some View {
         Button(action: onSwitch) {
-            VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 22) {
-                    identity
-                    HStack(alignment: .top, spacing: 20) {
-                        if provider == .claude {
-                            UsageMeter(title: featuredModelLimit.map { "Weekly \($0.name)" } ?? "Weekly Fable",
-                                       window: featuredModelLimit?.window, isFeatured: true)
-                            metricDivider
-                        }
-                        UsageMeter(title: "Five-hour limit", window: account.usage?.fiveHour)
-                        metricDivider
-                        UsageMeter(title: "Weekly limit", window: account.usage?.sevenDay)
+            VStack(alignment: .leading, spacing: 10) {
+                if wideLayout {
+                    HStack(alignment: .top, spacing: 24) {
+                        identity.frame(width: 220, alignment: .leading)
+                        usageContent
+                        actionIndicator
                     }
-                    if let usage = account.usage {
-                        ForEach(Array(usage.modelScoped.enumerated()), id: \.offset) { index, scoped in
-                            if index != featuredModelLimitIndex {
-                                UsageMeter(title: scopedLimitTitle(scoped.name), window: scoped.window)
-                            }
-                        }
-                        if provider == .claude {
-                            if let sonnet = usage.sevenDaySonnet {
-                                UsageMeter(title: "Weekly Sonnet", window: sonnet)
-                            }
-                            if let opus = usage.sevenDayOpus {
-                                UsageMeter(title: "Weekly Opus", window: opus)
-                            }
-                        }
+                    .frame(minHeight: 74, alignment: .top)
+                } else {
+                    HStack(alignment: .center, spacing: 12) {
+                        identity.frame(maxWidth: .infinity, alignment: .leading)
+                        actionIndicator
+                    }
+                    if !metrics.isEmpty || account.usage != nil && showsManualResets {
+                        usageContent.padding(.top, 5)
+                    } else {
+                        unavailableUsage
                     }
                 }
-                .padding(20)
-
-                Rectangle().fill(Palette.edge).frame(height: 0.5)
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 6) {
-                        if usageError != nil {
-                            Image(systemName: "exclamationmark.circle")
-                            if let usage = account.usage {
-                                TimelineView(.periodic(from: .now, by: 60)) { context in
-                                    Text("Saved usage · checked \(relativeDate(usage.fetchedAt, now: context.date))")
-                                }
-                            } else { Text("Usage unavailable") }
-                        } else if let usage = account.usage {
-                            Image(systemName: "clock")
-                            TimelineView(.periodic(from: .now, by: 60)) { context in
-                                Text("Checked \(relativeDate(usage.fetchedAt, now: context.date))")
-                            }
-                        } else {
-                            Image(systemName: "clock")
-                            Text("Usage hasn’t been checked")
-                        }
-                        Spacer(minLength: 12)
-                        if isActive { Text("Used for new \(provider.cliName) sessions").foregroundStyle(Palette.muted) }
-                    }
-                    .font(.system(size: 11))
-                    .foregroundStyle(usageError == nil ? Palette.muted : Palette.danger)
-                    if let usageError {
-                        Text(usageError)
-                            .font(.system(size: 11))
-                            .foregroundStyle(Palette.danger)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                if let usageError {
+                    Label(usageError, systemImage: "exclamationmark.circle")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.danger)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 10)
-                .background(Palette.canvas.opacity(0.38))
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(RoundedRectangle(cornerRadius: 18))
+            .contentShape(Rectangle())
         }
-        .buttonStyle(CardButtonStyle())
-        .background(Palette.paper)
-        .clipShape(RoundedRectangle(cornerRadius: 18))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18)
-                .strokeBorder(isActive ? Palette.coral.opacity(0.65) : Palette.edge.opacity(isHovered ? 1.8 : 1),
-                              lineWidth: isActive ? 1.25 : 1)
+        .buttonStyle(AccountRowButtonStyle())
+        .background(isActive ? Palette.greenWash.opacity(0.27) : isHovered ? Palette.paper.opacity(0.55) : Color.clear)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Palette.edge).frame(height: 0.7).padding(.horizontal, 16)
                 .allowsHitTesting(false)
         }
-        .shadow(color: .black.opacity(colorScheme == .dark ? 0 : 0.035), radius: 1, x: 0, y: 1)
-        .shadow(color: .black.opacity(colorScheme == .dark ? 0 : 0.025), radius: 5, x: 0, y: 3)
+        .overlay(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 1).fill(Palette.green)
+                .frame(width: 2).padding(.vertical, 15).opacity(isActive ? 1 : 0)
+                .allowsHitTesting(false)
+        }
         .overlay {
-            RoundedRectangle(cornerRadius: 21)
+            RoundedRectangle(cornerRadius: 2)
                 .stroke(Palette.accentText, lineWidth: 2)
-                .padding(-3)
+                .padding(-2)
                 .opacity(isFocused ? 1 : 0)
                 .allowsHitTesting(false)
         }
         .focusEffectDisabled()
         .focused($isFocused)
         .disabled(isActive || isBusy)
-        .accessibilityLabel(hasCustomName ? "\(account.label), \(account.email), \(account.plan)" : "\(account.email), \(account.plan)")
-        .accessibilityValue(isActive ? "Active account. \(usageDescription)" : usageDescription)
+        .accessibilityLabel(hasCustomName
+                             ? "\(provider.displayName), \(account.label), \(account.email), \(provider.planLabel(account.plan))"
+                             : "\(provider.displayName), \(account.email), \(provider.planLabel(account.plan))")
+        .accessibilityValue("\(isActive ? "Active account. " : "")\(renewalDescription) \(usageDescription)")
         .accessibilityHint(isActive ? "Used for new \(provider.cliName) sessions" : "Switch \(provider.cliName) to this account")
         .onHover { isHovered = $0 }
-        .overlay(alignment: .topTrailing) { options.padding(.top, 23).padding(.trailing, 14) }
+        .overlay(alignment: .topTrailing) {
+            options.padding(.trailing, 13).padding(.top, 15)
+        }
     }
 
     private var identity: some View {
-        HStack(spacing: 12) {
-            Text(account.initials.isEmpty ? "C" : account.initials)
-                .font(.system(size: 14, weight: .semibold, design: .rounded))
-                .foregroundStyle(isActive ? Palette.accentText : Palette.muted)
-                .frame(width: 40, height: 40)
-                .background(isActive ? Palette.coralWash : Palette.canvas, in: RoundedRectangle(cornerRadius: 11))
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 5) {
-                Text(account.label)
-                    .font(.system(size: 14, weight: .semibold))
+        VStack(alignment: .leading, spacing: 5) {
+            Text(account.label)
+                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                .lineLimit(1)
+                .truncationMode(hasCustomName ? .tail : .middle)
+            if hasCustomName {
+                Text(account.email)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.muted)
                     .lineLimit(1)
-                    .truncationMode(hasCustomName ? .tail : .middle)
-                HStack(spacing: 7) {
-                    if hasCustomName {
-                        Text(account.email).lineLimit(1).truncationMode(.middle)
-                        Text("·").accessibilityHidden(true)
+                    .truncationMode(.middle)
+            }
+            HStack(spacing: 8) {
+                PlanBadge(label: provider.planLabel(account.plan))
+                if let usage = account.usage {
+                    TimelineView(.periodic(from: .now, by: 60)) { context in
+                        Text("\(usageError == nil ? "Checked" : "Saved") \(relativeDate(usage.fetchedAt, now: context.date))")
                     }
-                    Text(account.plan).fixedSize()
-                }
-                .font(.system(size: 11))
-                .foregroundStyle(Palette.muted)
-            }
-            .help(hasCustomName ? "\(account.label)\n\(account.email)" : account.email)
-            Spacer(minLength: 4)
-            HStack(spacing: 6) {
-                if isActive {
-                    Image(systemName: "checkmark.circle.fill")
-                    Text("Active")
-                } else if isSwitching {
-                    ProgressView().controlSize(.mini).frame(width: 12, height: 12)
-                    Text("Switching…")
-                } else {
-                    Text("Switch")
-                    Image(systemName: "arrow.right").font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 10))
+                    .foregroundStyle(usageError == nil ? Palette.muted : Palette.danger)
+                    .lineLimit(1)
+                    .help("Last successful usage check: \(usage.fetchedAt.formatted(date: .complete, time: .shortened))")
                 }
             }
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(isActive ? Palette.green : Palette.ink)
-            .padding(.leading, isActive ? 10 : 12)
-            .padding(.trailing, 10)
-            .frame(height: 29)
-            .background(isActive ? Palette.greenWash : Palette.canvas, in: Capsule())
-            .fixedSize()
-            .padding(.trailing, 30)
+            if let renewal = account.renewalAt {
+                TimelineView(.periodic(from: .now, by: 60)) { context in
+                    Text("\(renewal > context.date ? "Renews" : "Renewal") \(compactDueDate(renewal)) · \(dueInterval(renewal, now: context.date))")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Palette.muted)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .help("Renewal date set manually: \(renewal.formatted(date: .complete, time: .shortened)). Edit it in account options.")
+            } else {
+                Text("Renewal not set")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Palette.muted)
+                    .help("Set the renewal date in account options.")
+            }
         }
+        .help(hasCustomName ? "\(account.label)\n\(account.email)" : account.email)
+    }
+
+    @ViewBuilder
+    private var usageContent: some View {
+        if !metrics.isEmpty || account.usage != nil && showsManualResets {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 22, alignment: .top), count: min(3, metricTitles.count + (showsManualResets ? 1 : 0))),
+                      alignment: .leading, spacing: 18) {
+                ForEach(metricTitles, id: \.self) { title in
+                    if let metric = metrics.first(where: { $0.title == title }) {
+                        UsageMeter(title: metric.title, window: metric.window)
+                    } else {
+                        Color.clear.frame(height: 66).accessibilityHidden(true)
+                    }
+                }
+                if showsManualResets {
+                    ManualResetSummaryView(summary: account.usage?.manualResets)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            unavailableUsage
+        }
+    }
+
+    private var unavailableUsage: some View {
+        Text(account.usage != nil ? "No quota windows reported"
+             : usageError == nil ? "Usage hasn’t been checked" : "Usage unavailable")
+            .font(.system(size: 12))
+            .foregroundStyle(usageError == nil ? Palette.muted : Palette.danger)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var actionIndicator: some View {
+        HStack(spacing: 5) {
+            if isActive {
+                Image(systemName: "checkmark.circle.fill")
+                Text("Active")
+            } else if isSwitching {
+                ProgressView().controlSize(.mini).frame(width: 12, height: 12)
+                Text("Switching…")
+            } else {
+                Text("Switch")
+                Image(systemName: "arrow.right").font(.system(size: 10, weight: .semibold))
+            }
+        }
+        .font(.system(size: 11, weight: .semibold))
+        .foregroundStyle(isActive ? Palette.green : Palette.ink)
+        .frame(width: 90, height: 28)
+        .background(isActive ? Palette.greenWash.opacity(0.7) : Color.clear, in: RoundedRectangle(cornerRadius: 4))
+        .padding(.trailing, 34)
+        .help(isActive ? "Used for new \(provider.cliName) sessions" : "Switch \(provider.cliName) to this account")
     }
 
     private var options: some View {
         Menu {
+            if account.usage?.manualResets != nil {
+                Button("Manual reset details…", systemImage: "arrow.counterclockwise", action: onViewResets)
+            }
+            Button(account.renewalAt == nil ? "Set renewal date…" : "Edit renewal date…",
+                   systemImage: "calendar", action: onSetRenewal)
             Button("Rename account…", systemImage: "pencil", action: onRename)
             Divider()
             Button("Remove saved account…", systemImage: "trash", role: .destructive, action: onRemove)
         } label: {
-            Image(systemName: "ellipsis")
+            Label("Options for \(provider.displayName) account \(account.label)", systemImage: "ellipsis")
+                .labelStyle(.iconOnly)
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(Palette.muted)
                 .frame(width: 32, height: 32)
@@ -475,111 +585,256 @@ private struct AccountCard: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .disabled(isBusy)
-        .help("Rename or remove \(account.label)")
-        .accessibilityLabel("Options for \(account.label)")
-    }
-
-    private var metricDivider: some View {
-        Rectangle().fill(Palette.edge).frame(width: 1, height: 108).accessibilityHidden(true)
-    }
-
-    private var featuredModelLimit: NamedUsageWindow? {
-        guard let index = featuredModelLimitIndex else { return nil }
-        return account.usage?.modelScoped[index]
-    }
-
-    private var featuredModelLimitIndex: Int? {
-        guard provider == .claude else { return nil }
-        return account.usage?.modelScoped.firstIndex {
-            $0.name.range(of: "\\bfable\\b", options: [.regularExpression, .caseInsensitive]) != nil
-        }
-    }
-
-    private func scopedLimitTitle(_ name: String) -> String {
-        provider == .claude ? "Weekly \(name)" : name
+        .help("Options for \(provider.displayName) account \(account.label): set renewal date, rename, or remove")
+        .accessibilityLabel("Options for \(provider.displayName) account \(account.label)")
+        .accessibilityIdentifier("account-options-\(provider.rawValue)-\(account.id.uuidString)")
     }
 
     private var usageDescription: String {
-        func describe(_ label: String, _ window: UsageWindow?) -> String {
-            guard let window else { return "\(label) usage unavailable." }
-            return "\(label) \(usagePercentage(window)) percent used. \(window.fraction >= 1 ? "Limit reached. " : "")\(resetDescription(window.resetsAt))."
+        let descriptions = metrics.map { metric in
+            "\(metric.title) \(remainingPercentage(metric.window)) percent remaining, \(usagePercentage(metric.window)) percent used. \(metric.window.fraction >= 1 ? "Limit reached. " : "")\(resetDescription(metric.window.resetsAt))."
         }
-        let fiveHour = describe("Five-hour limit", account.usage?.fiveHour)
-        let weekly = describe("Weekly limit", account.usage?.sevenDay)
-        let models = account.usage?.modelScoped.map {
-            describe(scopedLimitTitle($0.name), $0.window)
-        }.joined(separator: " ") ?? ""
+        let emptyDescription = account.usage == nil
+            ? (usageError == nil ? "Usage hasn’t been checked." : "Usage unavailable.")
+            : "No quota windows reported."
+        let windows = descriptions.isEmpty ? emptyDescription : descriptions.joined(separator: " ")
         let failure = usageError.map { "Usage check failed: \($0)" } ?? ""
-        return "\(fiveHour) \(weekly) \(models) \(failure)"
+        let resets: String
+        if let summary = account.usage?.manualResets {
+            let dates = summary.credits?.filter { $0.status == "available" }.enumerated().map { index, credit in
+                "Reset \(index + 1) \(credit.expiresAt.map { "expires \($0.formatted(date: .complete, time: .shortened))" } ?? "has no expiry")."
+            }.joined(separator: " ") ?? "Expiry details unavailable."
+            resets = "\(summary.availableCount) manual resets available. \(dates)"
+        } else { resets = showsManualResets ? "Manual resets unavailable." : "" }
+        return "\(windows) \(resets) \(failure)"
+    }
+
+    private var renewalDescription: String {
+        guard let renewal = account.renewalAt else { return "Renewal date not set." }
+        return "Renewal date set manually: \(renewal.formatted(date: .complete, time: .shortened))."
     }
 }
 
 private struct UsageMeter: View {
     let title: String
-    let window: UsageWindow?
-    var isFeatured = false
+    let window: UsageWindow
 
     private var color: Color {
-        guard let window else { return Palette.faint }
         if window.fraction >= 1 { return Palette.danger }
         if window.fraction >= 0.9 { return Palette.warning }
-        return isFeatured ? Palette.coral : Palette.meter
+        return Palette.meter
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Palette.muted)
-                .lineLimit(1)
-                .help(title)
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                if let window {
-                    Text("\(usagePercentage(window))%")
-                        .font(.system(size: 23, weight: .medium, design: .rounded))
-                        .monospacedDigit()
-                        .foregroundStyle(window.fraction >= 1 ? Palette.danger : Palette.ink)
-                    Text(window.fraction >= 1 ? "limit reached" : "used")
-                        .font(.system(size: 10))
-                        .foregroundStyle(window.fraction >= 1 ? Palette.danger : Palette.muted)
-                        .lineLimit(1)
-                } else {
-                    Text("—").font(.system(size: 23, weight: .regular)).foregroundStyle(Palette.muted)
-                    Text("unavailable").font(.system(size: 10)).foregroundStyle(Palette.muted)
-                }
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(title)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Palette.muted)
+                    .lineLimit(1)
+                    .help(title)
+                Spacer(minLength: 0)
+                Text("\(remainingPercentage(window))%")
+                    .font(.system(size: 15, weight: .semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(window.fraction >= 1 ? Palette.danger : Palette.ink)
+                    .fixedSize()
+                    .help("\(remainingPercentage(window))% remaining · \(usagePercentage(window))% used\(window.fraction >= 1 ? " · Limit reached" : "")")
             }
             .lineLimit(1)
             .minimumScaleFactor(0.85)
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
                     Capsule().fill(Palette.faint.opacity(0.7))
-                    if let window, window.fraction > 0 {
-                        Capsule().fill(color).frame(width: max(3, geometry.size.width * window.fraction))
+                    if window.fraction < 1 {
+                        Capsule().fill(color).frame(width: geometry.size.width * (1 - window.fraction))
                     }
                 }
             }
-            .frame(height: 5)
+            .frame(height: 4)
             .accessibilityHidden(true)
             TimelineView(.periodic(from: .now, by: 60)) { context in
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(resetCountdown(window?.resetsAt, now: context.date))
+                    Text(resetCountdown(window.resetsAt, now: context.date))
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(window?.resetsAt == nil ? Palette.muted : Palette.ink)
-                    Text(resetDateText(window?.resetsAt, now: context.date))
-                        .font(.system(size: 10))
+                        .foregroundStyle(window.resetsAt == nil ? Palette.muted : Palette.ink)
+                    Text(resetDateText(window.resetsAt, now: context.date))
+                        .font(.system(size: 11))
                         .foregroundStyle(Palette.muted)
                 }
                 .lineLimit(1)
                 .minimumScaleFactor(0.9)
-                .help(window?.resetsAt?.formatted(date: .complete, time: .shortened) ?? "Reset time unavailable")
+                .help(window.resetsAt?.formatted(date: .complete, time: .shortened) ?? "Reset time unavailable")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
+private struct ManualResetSummaryView: View {
+    let summary: ManualResetSummary?
+
+    private var availableCredits: [ManualResetCredit] {
+        summary?.credits?.filter { $0.status == "available" } ?? []
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text("Manual resets")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Palette.muted)
+            if let summary {
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Text("\(summary.availableCount)")
+                        .font(.system(size: 15, weight: .semibold))
+                        .monospacedDigit()
+                    Text("available")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.muted)
+                }
+                ForEach(Array(availableCredits.enumerated()), id: \.offset) { index, credit in
+                    if let expiry = credit.expiresAt {
+                        TimelineView(.periodic(from: .now, by: 60)) { context in
+                            ViewThatFits(in: .horizontal) {
+                                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                                    Text("Reset \(index + 1) · \(expiry > context.date ? dueInterval(expiry, now: context.date) : "expired")")
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundStyle(expiry > context.date ? Palette.ink : Palette.muted)
+                                    Text("· \(compactDueDate(expiry))")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(Palette.muted)
+                                }
+                                .fixedSize(horizontal: true, vertical: false)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("Reset \(index + 1) · \(expiry > context.date ? dueInterval(expiry, now: context.date) : "expired")")
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundStyle(expiry > context.date ? Palette.ink : Palette.muted)
+                                    Text(compactDueDate(expiry))
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(Palette.muted)
+                                }
+                            }
+                            .lineLimit(1)
+                            .help("Reset \(index + 1) expires \(expiry.formatted(date: .complete, time: .shortened)). Status reported by provider: \(credit.status).")
+                        }
+                    } else {
+                        Text("Reset \(index + 1) · No expiry")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Palette.muted)
+                    }
+                }
+                if summary.credits == nil {
+                    Text("Expiry details unavailable")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Palette.muted)
+                } else if summary.availableCount > availableCredits.count {
+                    Text("More expiry details unavailable")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Palette.muted)
+                }
+            } else {
+                Text("Unavailable")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.muted)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+}
+
+private struct ResetDetailsSheet: View {
+    let account: SavedAccount
+    let provider: SubscriptionProvider
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Manual resets")
+                .font(.system(size: 21, weight: .semibold))
+            Text("\(provider.displayName) · \(account.email)")
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.muted)
+            if let summary = account.usage?.manualResets {
+                Text("\(summary.availableCount) available")
+                    .font(.system(size: 16, weight: .semibold))
+                if let credits = summary.credits {
+                    if credits.isEmpty {
+                        Text("The provider returned no individual reset details.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Palette.muted)
+                    } else {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 16) {
+                                ForEach(Array(credits.enumerated()), id: \.offset) { index, credit in
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        HStack(alignment: .firstTextBaseline) {
+                                            Text(credit.title ?? "Reset \(index + 1)")
+                                                .font(.system(size: 13, weight: .semibold))
+                                            Spacer()
+                                            Text(credit.status.capitalized)
+                                                .font(.system(size: 11))
+                                                .foregroundStyle(Palette.muted)
+                                        }
+                                        if let detail = credit.detail, !detail.isEmpty {
+                                            Text(detail).font(.system(size: 12)).foregroundStyle(Palette.muted)
+                                        }
+                                        Text("Granted \(credit.grantedAt.formatted(date: .abbreviated, time: .shortened))")
+                                            .font(.system(size: 11)).foregroundStyle(Palette.muted)
+                                        Text(credit.expiresAt.map { "Expires \($0.formatted(date: .abbreviated, time: .shortened))" } ?? "No expiry")
+                                            .font(.system(size: 12, weight: .medium))
+                                        Divider()
+                                    }
+                                    .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
+                        .frame(maxHeight: 360)
+                    }
+                } else {
+                    Text("The available count was reported without individual expiry details.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Palette.muted)
+                }
+            } else {
+                Text("Manual reset information is unavailable.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.muted)
+            }
+            if let usage = account.usage {
+                Text("Checked \(usage.fetchedAt.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.muted)
+            }
+            HStack {
+                Spacer()
+                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(26)
+        .frame(width: 490)
+        .background(Palette.canvas)
+        .foregroundStyle(Palette.ink)
+        .onExitCommand { dismiss() }
+    }
+}
+
 private func usagePercentage(_ window: UsageWindow) -> String {
     window.utilization.formatted(.number.precision(.fractionLength(0...1)))
+}
+
+private func remainingPercentage(_ window: UsageWindow) -> String {
+    (100 * (1 - window.fraction)).formatted(.number.precision(.fractionLength(0...1)))
+}
+
+private struct PlanBadge: View {
+    let label: String
+
+    var body: some View {
+        Text(label)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(Palette.muted)
+            .fixedSize()
+    }
 }
 
 private struct AddAccountSheet: View {
@@ -637,15 +892,15 @@ private struct AddAccountSheet: View {
                 }
             } else if let current = model.current {
                 HStack(spacing: 11) {
-                    Image(systemName: "terminal").font(.system(size: 21)).foregroundStyle(Palette.coral)
+                    Image(systemName: "terminal").font(.system(size: 21)).foregroundStyle(Palette.accent)
                     VStack(alignment: .leading, spacing: 5) {
-                        Text("CURRENT \(model.provider.cliName.uppercased()) LOGIN")
-                            .font(.system(size: 9, weight: .semibold)).tracking(1)
+                        Text("Current \(model.provider.cliName) login")
+                            .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(Palette.muted)
                         Text(current.email).font(.system(size: 13, weight: .medium)).textSelection(.enabled)
                     }
                     Spacer()
-                    Text(current.plan).font(.system(size: 10, weight: .medium)).foregroundStyle(Palette.muted)
+                    PlanBadge(label: model.provider.planLabel(current.plan))
                 }
                 .padding(16)
                 .background(Palette.paper, in: RoundedRectangle(cornerRadius: 12))
@@ -743,10 +998,67 @@ private struct AddAccountSheet: View {
     private func loginStep(number: String, text: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Text(number).font(.system(size: 11, weight: .semibold, design: .rounded))
-                .foregroundStyle(Palette.coral)
+                .foregroundStyle(Palette.accent)
                 .frame(width: 19, height: 19)
-                .background(Palette.coralWash, in: Circle())
+                .background(Palette.accentWash, in: Circle())
             Text(text).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+private struct RenewalDateSheet: View {
+    @ObservedObject var model: AppModel
+    let account: SavedAccount
+    @Environment(\.dismiss) private var dismiss
+    @State private var renewalDate = Date()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Subscription renewal")
+                .font(.system(size: 21, weight: .semibold))
+            Text(account.email)
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.muted)
+            Text("Enter the date from your billing settings. This date is saved locally and is not verified with \(model.provider.displayName).")
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.muted)
+                .fixedSize(horizontal: false, vertical: true)
+            DatePicker("Renewal date", selection: $renewalDate, displayedComponents: [.date, .hourAndMinute])
+                .datePickerStyle(.compact)
+                .controlSize(.large)
+                .accessibilityLabel("Subscription renewal date and time")
+                .disabled(model.isBusy || model.isRefreshing)
+            if let error = model.error {
+                MessageStrip(symbol: "exclamationmark.circle", text: error, isError: true)
+            }
+            HStack {
+                if account.renewalAt != nil {
+                    Button("Clear date", role: .destructive) { save(nil) }
+                        .disabled(model.isBusy || model.isRefreshing)
+                }
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                    .disabled(model.isBusy)
+                Button("Save date") { save(renewalDate) }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Palette.ink)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(model.isBusy || model.isRefreshing)
+            }
+        }
+        .padding(26)
+        .frame(width: 450)
+        .background(Palette.canvas)
+        .foregroundStyle(Palette.ink)
+        .onAppear { renewalDate = account.renewalAt ?? Date() }
+        .interactiveDismissDisabled(model.isBusy)
+    }
+
+    private func save(_ date: Date?) {
+        Task {
+            await model.setRenewal(account: account, date: date)
+            if model.error == nil { dismiss() }
         }
     }
 }
@@ -788,17 +1100,32 @@ private struct RenameAccountSheet: View {
 }
 
 struct MenuContentView: View {
-    @ObservedObject var model: AppModel
+    @ObservedObject var model: DashboardModel
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        Menu("Subscription") {
-            providerMenuItem(.claude)
-            providerMenuItem(.chatGPT)
-        }
-        .disabled(model.isBusy || model.isRefreshing || model.isLoading || model.loginInProgress)
+        ProviderMenuGroup(model: model.claude, isBlocked: model.isBlocked)
         Divider()
-        Text("\(model.provider.displayName) accounts · \(model.provider.cliName)")
+        ProviderMenuGroup(model: model.chatGPT, isBlocked: model.isBlocked)
+        Divider()
+        Button("Open Switchboard") {
+            openWindow(id: "dashboard")
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        .keyboardShortcut("o", modifiers: .command)
+        Button("Refresh all usage") { Task { await model.refresh() } }
+            .disabled(model.isBlocked)
+        Divider()
+        Button("Quit Switchboard") { NSApp.terminate(nil) }.keyboardShortcut("q", modifiers: .command)
+    }
+}
+
+private struct ProviderMenuGroup: View {
+    @ObservedObject var model: AppModel
+    let isBlocked: Bool
+
+    var body: some View {
+        Text("\(model.provider.displayName) · \(model.provider.cliName)")
         if model.accounts.isEmpty {
             Text(model.isLoading ? "Loading accounts…" : model.loadError == nil ? "No saved accounts" : "Accounts unavailable — open Switchboard")
         } else if model.loadError != nil {
@@ -814,31 +1141,8 @@ struct MenuContentView: View {
                     Text(account.label)
                 }
             }
-            .disabled(model.isBusy || model.isRefreshing || model.isLoading || model.loginInProgress || model.activeID == account.id)
+            .disabled(isBlocked || model.activeID == account.id)
         }
-        Divider()
-        Button("Open Switchboard") {
-            openWindow(id: "main")
-            NSApp.activate(ignoringOtherApps: true)
-        }
-        .keyboardShortcut("o", modifiers: .command)
-        Button("Refresh usage") { Task { await model.refresh() } }
-            .disabled(model.isBusy || model.isRefreshing || model.isLoading || model.loginInProgress)
-        Divider()
-        Button("Quit Switchboard") { NSApp.terminate(nil) }.keyboardShortcut("q", modifiers: .command)
-    }
-
-    private func providerMenuItem(_ provider: SubscriptionProvider) -> some View {
-        Button {
-            Task { await model.selectProvider(provider) }
-        } label: {
-            if model.provider == provider {
-                Label(provider.displayName, systemImage: "checkmark")
-            } else {
-                Text(provider.displayName)
-            }
-        }
-        .disabled(model.provider == provider)
     }
 }
 
@@ -848,11 +1152,10 @@ private struct SwitchboardMark: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: size * 0.29)
-                .fill(Palette.coral)
-                .shadow(color: Palette.coral.opacity(0.13), radius: 5, x: 0, y: 2)
+                .fill(Palette.ink)
             Image(systemName: "arrow.left.arrow.right")
                 .font(.system(size: size * 0.40, weight: .medium))
-                .foregroundStyle(Color.white.opacity(0.94))
+                .foregroundStyle(Palette.canvas)
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)
@@ -872,7 +1175,7 @@ private struct MessageStrip: View {
         }
         .foregroundStyle(isError ? Palette.danger : Palette.muted)
         .padding(12)
-        .background(isError ? Palette.coralWash.opacity(0.5) : Palette.faint.opacity(0.28), in: RoundedRectangle(cornerRadius: 10))
+        .background(isError ? Palette.errorWash : Palette.faint.opacity(0.28), in: RoundedRectangle(cornerRadius: 10))
         .accessibilityElement(children: .combine)
     }
 }
@@ -906,7 +1209,7 @@ private struct ActionButtonStyle: ButtonStyle {
     }
 }
 
-private struct CardButtonStyle: ButtonStyle {
+private struct AccountRowButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         // Account switching is frequent. Keep the surface still and the usage legible.
         configuration.label.background(Palette.ink.opacity(configuration.isPressed ? 0.035 : 0))
@@ -926,6 +1229,24 @@ private func resetDescription(_ date: Date?) -> String {
     return "Resets \(date.formatted(date: .complete, time: .shortened))"
 }
 
+private func compactDueDate(_ date: Date) -> String {
+    let formatter = DateFormatter()
+    formatter.setLocalizedDateFormatFromTemplate("MMMdjm")
+    return formatter.string(from: date)
+}
+
+private func dueInterval(_ date: Date, now: Date = Date()) -> String {
+    let seconds = date.timeIntervalSince(now)
+    let minutes = max(1, Int(ceil(abs(seconds) / 60)))
+    let days = minutes / 1440
+    let hours = (minutes % 1440) / 60
+    let value: String
+    if days > 0 { value = "\(days)d \(hours)h" }
+    else if hours > 0 { value = "\(hours)h \(minutes % 60)m" }
+    else { value = "\(minutes)m" }
+    return seconds >= 0 ? "in \(value)" : "\(value) ago"
+}
+
 private func resetCountdown(_ date: Date?, now: Date = Date()) -> String {
     guard let date else { return "Reset time unknown" }
     let remaining = date.timeIntervalSince(now)
@@ -939,7 +1260,6 @@ private func resetCountdown(_ date: Date?, now: Date = Date()) -> String {
 
 private func resetDateText(_ date: Date?, now: Date = Date()) -> String {
     guard let date else { return "Refresh to check" }
-    guard date > now else { return "Refresh to check usage" }
     let time = date.formatted(date: .omitted, time: .shortened)
     if Calendar.current.isDate(date, inSameDayAs: now) { return "Today at \(time)" }
     if let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: now),

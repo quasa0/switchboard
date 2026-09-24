@@ -88,7 +88,7 @@ public struct CodexCredentialSnapshot: Codable, Equatable, Sendable {
               let workspace = (tokens["account_id"] as? String) ?? (auth["chatgpt_account_id"] as? String), !workspace.isEmpty else { throw invalidLogin() }
         if let claimWorkspace = auth["chatgpt_account_id"] as? String, claimWorkspace != workspace { throw invalidLogin() }
         let rawPlan = auth["chatgpt_plan_type"] as? String ?? "ChatGPT"
-        let plan = ["free": "Free", "plus": "Plus", "pro": "Pro", "team": "Team", "business": "Business", "enterprise": "Enterprise", "edu": "Edu"][rawPlan] ?? rawPlan.capitalized
+        let plan = SubscriptionProvider.chatGPT.planLabel(rawPlan)
         return CurrentLogin(email: email, accountUUID: user, organizationUUID: workspace, plan: plan)
     }
 

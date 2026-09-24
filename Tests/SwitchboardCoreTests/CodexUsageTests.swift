@@ -78,6 +78,88 @@ final class CodexUsageTests: XCTestCase {
         }
     }
 
+    func testManualResetDetailsPreserveCountExpiryAndProviderFields() throws {
+        let reply = """
+        {"result":{"rateLimitResetCredits":{"availableCount":4,"credits":[
+          {"id":"credit-a","resetType":"codexRateLimits","status":"available","grantedAt":1780000000,"expiresAt":1790000000,"title":"Earned reset","description":"Provider explanation"},
+          {"id":"credit-b","resetType":"codexRateLimits","status":"redeeming","grantedAt":1770000000,"expiresAt":1780000000,"title":null,"description":null},
+          {"id":"credit-c","resetType":"futureResetType","status":"futureStatus","grantedAt":1775000000,"expiresAt":null}
+        ]}}}
+        """
+        let result = try CodexUsageClient.parseUsageResponse(Data(reply.utf8))
+        let summary = try XCTUnwrap(result.manualResets)
+        XCTAssertEqual(summary.availableCount, 4, "A capped detail list must not replace the provider count")
+        let credits = try XCTUnwrap(summary.credits)
+        XCTAssertEqual(credits.map(\.id), ["credit-a", "credit-b", "credit-c"])
+        XCTAssertEqual(credits[0].grantedAt, Date(timeIntervalSince1970: 1_780_000_000))
+        XCTAssertEqual(credits[0].expiresAt, Date(timeIntervalSince1970: 1_790_000_000))
+        XCTAssertEqual(credits[0].title, "Earned reset")
+        XCTAssertEqual(credits[0].detail, "Provider explanation")
+        XCTAssertEqual(credits[1].status, "redeeming")
+        XCTAssertEqual(credits[1].expiresAt, Date(timeIntervalSince1970: 1_780_000_000), "Past due dates remain provider data")
+        XCTAssertNil(credits[2].expiresAt)
+        XCTAssertEqual(credits[2].resetType, "futureResetType")
+        XCTAssertEqual(credits[2].status, "futureStatus")
+        XCTAssertNil(result.fiveHour)
+        XCTAssertNil(result.sevenDay)
+    }
+
+    func testUnavailableManualResetsDifferFromReportedZero() throws {
+        let missing = try CodexUsageClient.parseUsageResponse(Data(Self.reply.utf8))
+        XCTAssertNil(missing.manualResets)
+        let nullReply = """
+        {"result":{"rateLimits":{"primary":{"usedPercent":10,"windowDurationMins":300}},"rateLimitResetCredits":null}}
+        """
+        XCTAssertNil(try CodexUsageClient.parseUsageResponse(Data(nullReply.utf8)).manualResets)
+        let zeroReply = """
+        {"result":{"rateLimitResetCredits":{"availableCount":0,"credits":[]}}}
+        """
+        let reportedZero = try CodexUsageClient.parseUsageResponse(Data(zeroReply.utf8))
+        XCTAssertEqual(reportedZero.manualResets?.availableCount, 0)
+        XCTAssertEqual(reportedZero.manualResets?.credits, [])
+    }
+
+    func testKnownManualResetCountDoesNotInventMissingDetails() throws {
+        for details in ["", ",\"credits\":null"] {
+            let reply = "{\"result\":{\"rateLimitResetCredits\":{\"availableCount\":3\(details)}}}"
+            let summary = try XCTUnwrap(CodexUsageClient.parseUsageResponse(Data(reply.utf8)).manualResets)
+            XCTAssertEqual(summary.availableCount, 3)
+            XCTAssertNil(summary.credits)
+        }
+        let fetchedEmpty = "{\"result\":{\"rateLimitResetCredits\":{\"availableCount\":3,\"credits\":[]}}}"
+        let summary = try XCTUnwrap(CodexUsageClient.parseUsageResponse(Data(fetchedEmpty.utf8)).manualResets)
+        XCTAssertEqual(summary.availableCount, 3)
+        XCTAssertEqual(summary.credits, [])
+    }
+
+    func testInvalidManualResetCountAndDatesAreRejected() {
+        let invalid = [
+            "{\"availableCount\":-1}",
+            "{\"availableCount\":1,\"credits\":[{\"id\":\"a\",\"resetType\":\"codexRateLimits\",\"status\":\"available\",\"grantedAt\":-1}]}",
+            "{\"availableCount\":1,\"credits\":[{\"id\":\"a\",\"resetType\":\"codexRateLimits\",\"status\":\"available\",\"grantedAt\":1780000000,\"expiresAt\":-1}]}",
+            "{\"availableCount\":1,\"credits\":[{\"id\":\"\",\"resetType\":\"codexRateLimits\",\"status\":\"available\",\"grantedAt\":1780000000}]}"
+        ]
+        for metadata in invalid {
+            let reply = "{\"result\":{\"rateLimitResetCredits\":\(metadata)}}"
+            XCTAssertThrowsError(try CodexUsageClient.parseUsageResponse(Data(reply.utf8)))
+        }
+    }
+
+    func testManualResetMetadataRoundTripsAndAbsentSavedFieldDecodes() throws {
+        let credit = ManualResetCredit(id: "credit-a", resetType: "codexRateLimits", status: "available",
+            grantedAt: Date(timeIntervalSince1970: 1_780_000_000), expiresAt: Date(timeIntervalSince1970: 1_790_000_000),
+            title: "Earned reset", detail: "Provider explanation")
+        let snapshot = UsageSnapshot(sevenDay: UsageWindow(utilization: 24, resetsAt: nil),
+            manualResets: ManualResetSummary(availableCount: 2, credits: [credit]))
+        let data = try JSONEncoder().encode(snapshot)
+        XCTAssertEqual(try JSONDecoder().decode(UsageSnapshot.self, from: data), snapshot)
+        var saved = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        saved.removeValue(forKey: "manualResets")
+        let withoutMetadata = try JSONDecoder().decode(UsageSnapshot.self, from: JSONSerialization.data(withJSONObject: saved))
+        XCTAssertNil(withoutMetadata.manualResets)
+        XCTAssertEqual(withoutMetadata.sevenDay, snapshot.sevenDay)
+    }
+
     func testInvalidPercentDurationAndResetDateAreRejected() {
         for window in ["{\"usedPercent\":-1}", "{\"usedPercent\":25,\"windowDurationMins\":0}", "{\"usedPercent\":25,\"resetsAt\":-10}"] {
             let reply = "{\"result\":{\"rateLimits\":{\"primary\":\(window)}}}"
@@ -107,9 +189,10 @@ final class CodexUsageTests: XCTestCase {
         print(json.dumps({'method':'account/updated','params':{}}), flush=True)
         request = handshake()
         assert request['method'] == 'account/rateLimits/read'
-        assert request['params'] == {'excludeResetCreditDetails':True}
+        assert request['params'] == {'excludeResetCreditDetails':False}
         Path(os.environ['CODEX_HOME'], 'auth.json').write_text('synthetic-refreshed-auth')
         reply = json.loads(\(Self.pythonString(Self.reply)))
+        reply['result']['rateLimitResetCredits'] = {'availableCount':2,'credits':None}
         reply['id'] = request['id']
         print(json.dumps(reply), flush=True)
         assert sys.stdin.read() == ''
@@ -118,6 +201,7 @@ final class CodexUsageTests: XCTestCase {
         defer { fixture.remove() }
         let result = try await CodexUsageClient(executable: fixture.executable).fetch(installation: fixture.installation)
         XCTAssertEqual(result.fiveHour?.utilization, 12)
+        XCTAssertEqual(result.manualResets?.availableCount, 2)
         XCTAssertEqual(try String(contentsOf: fixture.installation.authFile, encoding: .utf8), "synthetic-refreshed-auth")
         XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.executable.path + ".clean-exit"))
         try fixture.assertChildStopped()
